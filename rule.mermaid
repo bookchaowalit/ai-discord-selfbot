@@ -1,13 +1,15 @@
 flowchart TD
-    A[User sends a message] --> B{Is the message from\nthe target user?}
+    A[User sends message] --> B{Is message from\ntarget user?}
     B -- No --> Z[Ignore]
-    B -- Yes --> C[Add message to history]
+    B -- Yes --> C[Add message to\nhistory & context]
     C --> D{Is this the last message?}
     D -- No --> Z
-    D -- Yes --> E[Filter Agent:\nIs the message casual/friendly?]
-    E -- No --> F[Skip response\nLog/alert in terminal]
-    E -- Yes --> G[Main Agent:\nGenerate casual reply]
-    G --> H{Is the reply empty?}
-    H -- Yes --> F
-    H -- No --> I[Wait random delay (1-3s)]
-    I --> J[Send reply to chat]
+    D -- Yes --> E[Classify message tone & context]
+    E --> F{Is message suitable\nfor response?}
+    F -- No --> G[Optionally send\nfallback or ignore]
+    F -- Yes --> H[Generate\ncontext-aware reply]
+    H --> I{Is reply valid\nand non-empty?}
+    I -- No --> G
+    I -- Yes --> J[Calculate variable delay\n(based on reply length)]
+    J --> K[Simulate typing indicator\nand inject typos/corrections]
+    K --> L[Send reply to chat]

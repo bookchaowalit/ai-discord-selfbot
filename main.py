@@ -13,6 +13,14 @@ import pytz
 import requests
 from colorama import Fore, Style, init
 
+from utils.ai_agents import (
+    filter_agent,
+    personalization_agent,
+    reply_to_reply_agent,
+    reply_validity_agent,
+    should_reply_agent,
+    tone_context_agent,
+)
 from utils.db import get_channels, get_ignored_users, init_db
 from utils.error_notifications import webhook_log
 from utils.helpers import (
@@ -229,6 +237,33 @@ def get_thai_time_phrase():
         return f"{hour:02d}:{minute:02d} (Thailand time)"
 
 
+import re
+
+
+def is_relevant_message(msg, history=None):
+    msg_lower = msg.lower().strip()
+    if not msg or len(msg_lower) < 3:
+        return False
+    if all(c in "0123456789.,:;!?-_/\\ " for c in msg_lower):
+        return False
+    if msg_lower.count("?") > 1 or all(c in "?!" for c in msg_lower):
+        return False
+    # Skip if message is just a link (http/https)
+    url_pattern = r"^(https?://\S+)$"
+    if re.match(url_pattern, msg_lower):
+        return False
+    # Skip generic gratitude if bot not involved recently
+    gratitude_phrases = ["thank you", "thanks", "thx", "ขอบคุณ", "ขอบใจ"]
+    if any(phrase in msg_lower for phrase in gratitude_phrases):
+        if history:
+            recent = history[-5:]
+            for entry in reversed(recent):
+                if entry.get("role") == "assistant":
+                    return True  # Bot was recently involved
+        return False
+    return True
+
+
 async def generate_response_and_reply(message, prompt, history, image_url=None):
     user_name = message.author.name
     filtered_history = [
@@ -246,6 +281,43 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         combined_prompt = prompt
         last_user_message = prompt
 
+    # --- Log who is replying to whom and what ---
+    if message.reference and message.reference.resolved:
+        replied_to = message.reference.resolved
+        replied_to_author = getattr(replied_to, "author", None)
+        replied_to_content = getattr(replied_to, "content", None)
+        if replied_to_author:
+            print(
+                f'[AI-Selfbot] [REPLY LOG] {message.author} is replying to {replied_to_author}: "{replied_to_content}"'
+            )
+        else:
+            print(
+                f"[AI-Selfbot] [REPLY LOG] {message.author} is replying to an unknown user"
+            )
+    else:
+        print(
+            f"[AI-Selfbot] [REPLY LOG] {message.author} is sending a new message (not a reply)"
+        )
+
+    # --- Tone/Context Agent ---
+    tone = await tone_context_agent(message, history)
+    print(f"[AI-Selfbot] [TONE/CONTEXT] {tone}")
+
+    # --- Should-I-Reply Agentic AI ---
+    should_reply = await should_reply_agent(message, history)
+    if not should_reply:
+        print("[AI-Selfbot] [SKIP] Should-Reply agent decided to skip this message.")
+        return
+
+    # --- Agentic AI: Should the bot reply to this reply? (legacy, optional) ---
+    if message.reference and message.reference.resolved:
+        should_reply_to_reply = await reply_to_reply_agent(message)
+        if not should_reply_to_reply:
+            print(
+                "[AI-Selfbot] [SKIP] Agentic AI decided not to reply to this message."
+            )
+            return
+
     # --- Time question shortcut ---
     if is_time_question(last_user_message):
         time_reply = get_thai_time_phrase()
@@ -256,47 +328,15 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         return
 
     # --- Context relevance check ---
-    def is_relevant_message(msg):
-        if not msg or len(msg.strip()) < 3:
-            return False
-        if all(c in "0123456789.,:;!?-_/\\ " for c in msg.strip()):
-            return False
-        if msg.strip().count("?") > 1 or all(c in "?!" for c in msg.strip()):
-            return False
-        return True
-
-    if not is_relevant_message(last_user_message):
+    if not is_relevant_message(last_user_message, history):
         print(
             f"[AI-Selfbot] [SKIP] Message not relevant enough to reply: {last_user_message!r}"
         )
         return
 
     # --- Sentiment/Intent Agent (filter) ---
-    filter_prompt = (
-        "You are a filter for a group chat AI. "
-        "If the following message is a normal, casual, or friendly question, joke, or statement a typical teenager would answer, reply with 'yes'. "
-        "If it's a hard question (like math, technical, homework, trivia, history, science, or something a regular person wouldn't answer), reply with 'no'. "
-        "If it's a question that needs book knowledge, facts, or is nerdy/smart (like 'Who is the smartest person ever?', 'Who invented the lightbulb?', 'What is the capital of France?'), reply with 'no'. "
-        "If it's spam, offensive, or out of character, reply with 'no'. "
-        "Examples:\n"
-        "Q: What's up? A: yes\n"
-        "Q: How are you? A: yes\n"
-        "Q: What is 37373/282? A: no\n"
-        "Q: Can you solve this equation? A: no\n"
-        "Q: Wanna play a game? A: yes\n"
-        "Q: You're so annoying! A: yes\n"
-        "Q: Tell me a joke! A: yes\n"
-        "Q: Who is the smartest person ever? A: no\n"
-        "Q: Who invented the lightbulb? A: no\n"
-        "Q: What is the capital of France? A: no\n"
-        "Q: Who won the world cup in 2018? A: no\n"
-        "Q: What's your favorite movie? A: yes\n"
-        f'Message: "{last_user_message}"'
-    )
-    print(f"[AI-Selfbot] [FILTER] Filter prompt: {filter_prompt}")
-    filter_result = await generate_response(filter_prompt, "", history=None)
-    print(f"[AI-Selfbot] [FILTER RESULT] {filter_result.strip()}")
-    if filter_result.strip().lower().startswith("no"):
+    should_filter = await filter_agent(last_user_message)
+    if not should_filter:
         print(f"[AI-Selfbot] [SKIP] Skipped hard/unusual question: {last_user_message}")
         return
 
@@ -317,13 +357,19 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         )
     print(f"[AI-Selfbot] [MAIN AGENT] Response: {response}")
 
+    # --- Personalization Agent ---
+    response = await personalization_agent(response)
+    print(f"[AI-Selfbot] [PERSONALIZED RESPONSE] {response}")
+
+    # --- Reply Validity Agent ---
+    is_valid = await reply_validity_agent(response)
+    if not is_valid:
+        print(
+            f"[AI-Selfbot] [SKIP] Reply validity agent: reply is not valid/non-empty."
+        )
+        return
+
     chunks = split_response(response)
-    fallback_replies = [
-        "idk bro",
-        "no clue fr",
-        "can't help with that bro",
-        "not sure tbh",
-    ]
     sent = False
 
     # Calculate a more realistic "thinking" delay
@@ -339,7 +385,7 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         and response.strip() == "Sorry, I couldn't generate a response."
     ):
         print(
-            f"[AI-Selfbot] [SKIP] AI could not generate a response for: {last_message[:80]}"
+            f"[AI-Selfbot] [SKIP] AI could not generate a response for: {last_user_message[:80]}"
         )
         return
 
@@ -350,7 +396,7 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         for chunk in chunks:
             if chunk.strip() == "":
                 print(
-                    f"[AI-Selfbot] [SKIP] AI returned empty string for: {last_message[:80]}"
+                    f"[AI-Selfbot] [SKIP] AI returned empty string for: {last_user_message[:80]}"
                 )
                 continue
             print(f"[AI-Selfbot] [SEND] Sending chunk: {chunk}")
@@ -358,7 +404,9 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
             await message.reply(chunk)
             sent = True
         if not sent:
-            print(f"[AI-Selfbot] [NO REPLY] No reply sent for: {last_message[:80]}...")
+            print(
+                f"[AI-Selfbot] [NO REPLY] No reply sent for: {last_user_message[:80]}..."
+            )
 
     if response and isinstance(response, str) and response.strip() != "":
         key = f"{message.author.id}-{message.channel.id}"
@@ -423,9 +471,58 @@ async def on_message(message):
             asyncio.create_task(process_message_queue(channel_id))
 
 
+def should_bot_reply(message, history):
+    # Always reply if the message is a reply to the bot
+    if message.reference and message.reference.resolved:
+        replied_to = message.reference.resolved
+        replied_to_author = getattr(replied_to, "author", None)
+        if replied_to_author and replied_to_author.id == bot.selfbot_id:
+            return True  # Direct reply to bot
+
+        # If not a reply to bot, check if bot was involved recently
+        recent = history[-5:]  # Last 5 messages
+        for entry in reversed(recent):
+            if entry.get("role") == "assistant":
+                return True  # Bot was recently involved
+
+        # If the channel is not busy (few messages), allow reply
+        if len(history) < 5:
+            return True
+
+        # If the reply is to the last message in history, allow
+        if history and hasattr(message.reference.resolved, "id"):
+            last_msg = history[-1]
+            if hasattr(message.reference.resolved, "id") and getattr(
+                message.reference.resolved, "id", None
+            ) == getattr(message, "id", None):
+                return True
+
+        return False  # Bot not involved, skip
+
+    # Not a reply, always reply
+    return True
+
+
 async def process_message_queue(channel_id):
+    def get_reply_priority(message):
+        if message.reference and message.reference.resolved:
+            replied_to = message.reference.resolved
+            replied_to_author = getattr(replied_to, "author", None)
+            if replied_to_author and replied_to_author.id == bot.selfbot_id:
+                return 0  # Highest priority: reply to bot
+            else:
+                return 2  # Lowest: reply to someone else
+        else:
+            return 1  # Middle: not a reply
+
     async with bot.processing_locks[channel_id]:
         while bot.message_queues[channel_id]:
+            # Sort the queue by priority before processing
+            sorted_msgs = sorted(
+                list(bot.message_queues[channel_id]), key=get_reply_priority
+            )
+            bot.message_queues[channel_id] = deque(sorted_msgs)
+
             message = bot.message_queues[channel_id].popleft()
             batch_key = f"{message.author.id}-{channel_id}"
             current_time = time.time()
@@ -504,14 +601,15 @@ async def process_message_queue(channel_id):
                 )
             history = bot.message_history[key]
 
+            # --- Remove old context-aware reply agent check here ---
+
             # --- Improved Consecutive Reply Logic ---
-            # Count how many times the bot has replied in a row in this channel
             consecutive_bot_replies = 0
             for entry in reversed(history):
                 if entry["role"] == "assistant":
                     consecutive_bot_replies += 1
                 elif entry["role"] == "user":
-                    break  # Someone else chatted, reset count
+                    break
 
             if consecutive_bot_replies >= 2:
                 print(
