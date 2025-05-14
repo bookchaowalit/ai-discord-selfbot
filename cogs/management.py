@@ -1,24 +1,23 @@
-import discord
-import os
-import sys
-import subprocess
-import yaml
-import re
 import asyncio
+import os
+import re
+import subprocess
+import sys
 
+import discord
+import yaml
 from discord.ext import commands
-from utils.helpers import load_instructions, load_config, resource_path
-from utils.db import (
-    add_ignored_user,
-    remove_ignored_user,
-    remove_channel,
-    add_channel,
-)
+
+from utils.db import add_channel, add_ignored_user, remove_channel, remove_ignored_user
+from utils.helpers import load_config, load_instructions, resource_path
 
 
 class Management(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    def is_owner(ctx):
+        return ctx.author.id == ctx.bot.owner_id
 
     def save_config(self, new_config):
         config_path = resource_path("config/config.yaml")
@@ -29,6 +28,7 @@ class Management(commands.Cog):
     @commands.command(
         name="pause", description="Pause the bot from producing AI responses."
     )
+    @commands.check(is_owner)
     async def pause(self, ctx):
         if ctx.author.id == self.bot.owner_id:
             self.bot.paused = not self.bot.paused
@@ -37,6 +37,7 @@ class Management(commands.Cog):
             )
 
     @commands.command(name="toggledm", description="Toggle DM for chatting")
+    @commands.check(is_owner)
     async def toggledm(self, ctx):
         if ctx.author.id == self.bot.owner_id:
             self.bot.allow_dm = not self.bot.allow_dm
@@ -52,6 +53,7 @@ class Management(commands.Cog):
             )
 
     @commands.command(name="togglegc", description="Toggle chatting in group chats.")
+    @commands.check(is_owner)
     async def togglegc(self, ctx):
         if ctx.author.id == self.bot.owner_id:
             self.bot.allow_gc = not self.bot.allow_gc
@@ -67,6 +69,7 @@ class Management(commands.Cog):
             )
 
     @commands.command()
+    @commands.check(is_owner)
     async def ignore(self, ctx, user: discord.User):
         try:
             if ctx.author.id == self.bot.owner_id:
@@ -87,6 +90,7 @@ class Management(commands.Cog):
             await ctx.send(f"Error: {e}")
 
     @commands.command(name="toggleactive", description="Toggle active channels")
+    @commands.check(is_owner)
     async def toggleactive(self, ctx, channel=None):
         if ctx.author.id == self.bot.owner_id:
             if channel is None:
@@ -114,14 +118,13 @@ class Management(commands.Cog):
             else:
                 self.bot.active_channels.add(channel_id)
                 add_channel(channel_id)
-                await ctx.send(
-                    f"{'This DM' if isinstance(ctx.channel, discord.DMChannel) else 'This group' if isinstance(ctx.channel, discord.GroupChannel) else channel.mention} has been added to the list of active channels."
-                )
+                print(f"Added {channel_id} to active channels.")
 
     @commands.command(
         name="wipe",
         description="Clears the bots message history, resetting it's memory.",
     )
+    @commands.check(is_owner)
     async def wipe(self, ctx):
         if ctx.author.id == self.bot.owner_id:
             self.bot.message_history.clear()
@@ -131,6 +134,7 @@ class Management(commands.Cog):
         name="reload",
         description="Reloads all cogs and the bot instructions.",
     )
+    @commands.check(is_owner)
     async def reload(self, ctx):
         if ctx.author.id == self.bot.owner_id:
             for filename in os.listdir("./cogs"):
@@ -154,6 +158,7 @@ class Management(commands.Cog):
         name="restart",
         description="Restarts the bot.",
     )
+    @commands.check(is_owner)
     async def restart(self, ctx):
         if ctx.author.id == self.bot.owner_id:
             await ctx.message.add_reaction("✅")
@@ -180,6 +185,7 @@ class Management(commands.Cog):
         name="shutdown",
         description="Shuts down the bot.",
     )
+    @commands.check(is_owner)
     async def shutdown(self, ctx):
         if ctx.author.id == self.bot.owner_id:
             await ctx.message.add_reaction("✅")
@@ -194,6 +200,7 @@ class Management(commands.Cog):
         description="View or change the AI prompt.",
         aliases=["prompt", "setprompt", "sp"],
     )
+    @commands.check(is_owner)
     async def instructions(self, ctx, *, prompt=None):
         if ctx.author.id == self.bot.owner_id:
             if prompt is None:
