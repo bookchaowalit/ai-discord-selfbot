@@ -8,6 +8,11 @@ import sys
 import time
 import requests
 
+<<<<<<< HEAD
+=======
+from utils.db import get_channels, get_ignored_users, init_db
+from utils.error_notifications import webhook_log
+>>>>>>> parent of 57ce5e2 (chore: update bot configuration and enhance response logic with new AI agents for improved message handling)
 from utils.helpers import (
     clear_console,
     resource_path,
@@ -236,6 +241,43 @@ def update_message_history(author_id, message_content):
     bot.message_history[author_id] = bot.message_history[author_id][-MAX_HISTORY:]
 
 
+<<<<<<< HEAD
+=======
+# --- Time question helpers ---
+def is_time_question(msg):
+    msg = msg.lower()
+    return any(
+        kw in msg
+        for kw in [
+            "what time",
+            "time is it",
+            "current time",
+            "now time",
+        ]
+    )
+
+
+def get_thai_time_phrase():
+    tz = pytz.timezone("Asia/Bangkok")
+    now = datetime.now(tz)
+    hour = now.hour
+    minute = now.minute
+    if random.random() < 0.5:
+        # Phrase
+        if 5 <= hour < 12:
+            return random.choice(["morning", "it's morning"])
+        elif 12 <= hour < 17:
+            return random.choice(["afternoon", "it's afternoon"])
+        elif 17 <= hour < 20:
+            return random.choice(["evening", "it's evening"])
+        else:
+            return random.choice(["night", "it's night"])
+    else:
+        # Digital time
+        return f"{hour:02d}:{minute:02d} (Thailand time)"
+
+
+>>>>>>> parent of 57ce5e2 (chore: update bot configuration and enhance response logic with new AI agents for improved message handling)
 async def generate_response_and_reply(message, prompt, history, image_url=None):
     if not bot.realistic_typing:
         async with message.channel.typing():
@@ -246,6 +288,7 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
             else:
                 response = await generate_response(prompt, bot.instructions, history)
     else:
+<<<<<<< HEAD
         if image_url:
             response = await generate_response_image(
                 prompt, bot.instructions, image_url, history
@@ -254,11 +297,96 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
             response = await generate_response(prompt, bot.instructions, history)
 
     chunks = split_response(response)
+=======
+        combined_prompt = prompt
+        last_user_message = prompt
+
+    # --- Time question shortcut ---
+    if is_time_question(last_user_message):
+        time_reply = get_thai_time_phrase()
+        print(f"[AI-Selfbot] [TIME] Auto-answering time: {time_reply}")
+        await message.reply(time_reply)
+        key = f"{message.author.id}-{message.channel.id}"
+        bot.message_history[key].append({"role": "assistant", "content": time_reply})
+        return
+
+    # --- Context relevance check ---
+    def is_relevant_message(msg):
+        if not msg or len(msg.strip()) < 3:
+            return False
+        if all(c in "0123456789.,:;!?-_/\\ " for c in msg.strip()):
+            return False
+        if msg.strip().count("?") > 1 or all(c in "?!" for c in msg.strip()):
+            return False
+        return True
+
+    if not is_relevant_message(last_user_message):
+        print(
+            f"[AI-Selfbot] [SKIP] Message not relevant enough to reply: {last_user_message!r}"
+        )
+        return
+
+    # --- Sentiment/Intent Agent (filter) ---
+    filter_prompt = (
+        "You are a filter for a group chat AI. "
+        "If the following message is a normal, casual, or friendly question, joke, or statement a typical teenager would answer, reply with 'yes'. "
+        "If it's a hard question (like math, technical, homework, trivia, history, science, or something a regular person wouldn't answer), reply with 'no'. "
+        "If it's a question that needs book knowledge, facts, or is nerdy/smart (like 'Who is the smartest person ever?', 'Who invented the lightbulb?', 'What is the capital of France?'), reply with 'no'. "
+        "If it's spam, offensive, or out of character, reply with 'no'. "
+        "Examples:\n"
+        "Q: What's up? A: yes\n"
+        "Q: How are you? A: yes\n"
+        "Q: What is 37373/282? A: no\n"
+        "Q: Can you solve this equation? A: no\n"
+        "Q: Wanna play a game? A: yes\n"
+        "Q: You're so annoying! A: yes\n"
+        "Q: Tell me a joke! A: yes\n"
+        "Q: Who is the smartest person ever? A: no\n"
+        "Q: Who invented the lightbulb? A: no\n"
+        "Q: What is the capital of France? A: no\n"
+        "Q: Who won the world cup in 2018? A: no\n"
+        "Q: What's your favorite movie? A: yes\n"
+        f'Message: "{last_user_message}"'
+    )
+    print(f"[AI-Selfbot] [FILTER] Filter prompt: {filter_prompt}")
+    filter_result = await generate_response(filter_prompt, "", history=None)
+    print(f"[AI-Selfbot] [FILTER RESULT] {filter_result.strip()}")
+    if filter_result.strip().lower().startswith("no"):
+        print(f"[AI-Selfbot] [SKIP] Skipped hard/unusual question: {last_user_message}")
+        return
+
+    # --- Contextual Agent: Build context string ---
+    context_str = build_context_window(filtered_history, user_name)
+    instructions = load_instructions() + f"\n{context_str}"
+
+    # --- Main Agent ---
+    print(f"[AI-Selfbot] [MAIN AGENT] Instructions: {instructions}")
+    print(f"[AI-Selfbot] [MAIN AGENT] Prompt: {combined_prompt}")
+    if image_url:
+        response = await generate_response_image(
+            combined_prompt, instructions, image_url, filtered_history
+        )
+    else:
+        response = await generate_response(
+            combined_prompt, instructions, filtered_history
+        )
+    print(f"[AI-Selfbot] [MAIN AGENT] Response: {response}")
+
+    chunks = split_response(response)
+    fallback_replies = [
+        "idk bro",
+        "no clue fr",
+        "can't help with that bro",
+        "not sure tbh",
+    ]
+    sent = False
+>>>>>>> parent of 57ce5e2 (chore: update bot configuration and enhance response logic with new AI agents for improved message handling)
 
     if len(chunks) > 3:
         chunks = chunks[:3]
         print(f"{datetime.now().strftime('[%H:%M:%S]')} Response too long, truncating.")
 
+<<<<<<< HEAD
     for chunk in chunks:
         if DISABLE_MENTIONS:
             chunk = chunk.replace(
@@ -272,6 +400,35 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
                 chunk,
                 flags=re.IGNORECASE,
             )
+=======
+    # If the AI failed, skip sending and log
+    if (
+        response is not None
+        and isinstance(response, str)
+        and response.strip() == "Sorry, I couldn't generate a response."
+    ):
+        print(
+            f"[AI-Selfbot] [SKIP] AI could not generate a response for: {last_message[:80]}"
+        )
+        return
+
+    print(f"[AI-Selfbot] [TYPING DELAY] Waiting {base_delay:.2f}s before replying...")
+    await asyncio.sleep(base_delay)
+
+    async with message.channel.typing():
+        for chunk in chunks:
+            if chunk.strip() == "":
+                print(
+                    f"[AI-Selfbot] [SKIP] AI returned empty string for: {last_message[:80]}"
+                )
+                continue
+            print(f"[AI-Selfbot] [SEND] Sending chunk: {chunk}")
+            await asyncio.sleep(random.uniform(1.0, 3.0))
+            await message.reply(chunk)
+            sent = True
+        if not sent:
+            print(f"[AI-Selfbot] [NO REPLY] No reply sent for: {last_message[:80]}...")
+>>>>>>> parent of 57ce5e2 (chore: update bot configuration and enhance response logic with new AI agents for improved message handling)
 
         print(
             f'{datetime.now().strftime("[%H:%M:%S]")} {message.author.name}: {prompt}'
@@ -518,6 +675,37 @@ async def process_message_queue(channel_id):
             )
             history = bot.message_history[key]
 
+<<<<<<< HEAD
+=======
+            # --- Improved Consecutive Reply Logic ---
+            # Count how many times the bot has replied in a row in this channel
+            consecutive_bot_replies = 0
+            for entry in reversed(history):
+                if entry["role"] == "assistant":
+                    consecutive_bot_replies += 1
+                elif entry["role"] == "user":
+                    break  # Someone else chatted, reset count
+
+            if consecutive_bot_replies >= 2:
+                print(
+                    f"[AI-Selfbot] [WAIT] Already replied {consecutive_bot_replies} times in a row in channel {channel_id}. Waiting for someone else to chat."
+                )
+                return
+
+            # --- Global delay between replies logic ---
+            now = time.time()
+            min_delay = 25  # seconds
+            max_delay = 40  # seconds
+            delay = random.uniform(min_delay, max_delay)
+            last_time = bot.last_reply_time.get(channel_id, 0)
+            if now - last_time < delay:
+                wait_time = delay - (now - last_time)
+                print(
+                    f"[AI-Selfbot] [WAIT] Waiting {wait_time:.2f}s before replying again in channel {channel_id}."
+                )
+                await asyncio.sleep(wait_time)
+
+>>>>>>> parent of 57ce5e2 (chore: update bot configuration and enhance response logic with new AI agents for improved message handling)
             if message_to_reply_to.channel.id in bot.active_channels or (
                 isinstance(message_to_reply_to.channel, discord.DMChannel)
                 and bot.allow_dm
