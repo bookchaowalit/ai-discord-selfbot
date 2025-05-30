@@ -1,42 +1,25 @@
 import os
-import random
-import re
+import asyncio
+import discord
 import shutil
+import re
+import random
 import sys
 import time
-from datetime import datetime
-
-import discord
-import pytz
 import requests
-from colorama import Fore, Style, init
 
-from utils.db import get_channels, get_ignored_users, init_db
-from utils.error_notifications import webhook_log
 from utils.helpers import (
     clear_console,
-    get_env_path,
-    load_config,
-    load_instructions,
     resource_path,
+    get_env_path,
+    load_instructions,
+    load_config,
 )
+from utils.db import init_db, get_channels, get_ignored_users
+from utils.error_notifications import webhook_log
+from colorama import init, Fore, Style
 
 init()
-
-MAX_CONTEXT = 6
-
-
-def build_context_window(history, user_name):
-    context_window = history[-MAX_CONTEXT:] if history else []
-    return "\n".join(
-        [
-            f"{user_name}: {msg['content']}"
-            for msg in context_window
-            if msg["role"] == "user"
-            and msg.get("content")
-            and isinstance(msg["content"], str)
-        ]
-    )
 
 
 def check_config():
@@ -52,6 +35,7 @@ def check_config():
 def check_for_update():
     url = "https://api.github.com/repos/Najmul190/Discord-AI-Selfbot/releases/latest"
     response = requests.get(url)
+
     if response.status_code == 200:
         return response.json()["tag_name"]
     else:
@@ -66,21 +50,23 @@ if update_available:
     print(
         f"{Fore.RED}A new version of the AI Selfbot is available! Please update to {latest_version} at: \nhttps://github.com/Najmul190/Discord-AI-Selfbot/releases/latest{Style.RESET_ALL}"
     )
+
     time.sleep(5)
 
 check_config()
 config = load_config()
 
-from asyncio import Lock
-from collections import deque
-
-from discord.ext import commands
+from utils.ai import init_ai
 from dotenv import load_dotenv
-
-from utils.ai import generate_response, generate_response_image, init_ai
+from discord.ext import commands
+from utils.ai import generate_response, generate_response_image
 from utils.split_response import split_response
+from datetime import datetime
+from collections import deque
+from asyncio import Lock
 
 env_path = get_env_path()
+
 load_dotenv(dotenv_path=env_path, override=True)
 
 init_db()
@@ -89,12 +75,13 @@ init_ai()
 TOKEN = os.getenv("DISCORD_TOKEN")
 PREFIX = config["bot"]["prefix"]
 OWNER_ID = config["bot"]["owner_id"]
+TRIGGER = config["bot"]["trigger"].lower().split(",")
 DISABLE_MENTIONS = config["bot"]["disable_mentions"]
 
 bot = commands.Bot(command_prefix=PREFIX, help_command=None)
 
 bot.owner_id = OWNER_ID
-bot.active_channels = set(config["bot"].get("active_channels", []))
+bot.active_channels = set(get_channels())
 bot.ignore_users = get_ignored_users()
 bot.message_history = {}
 bot.paused = False
@@ -108,7 +95,6 @@ bot.batch_wait_time = float(config["bot"]["batch_wait_time"])
 bot.hold_conversation = config["bot"]["hold_conversation"]
 bot.user_message_counts = {}
 bot.user_cooldowns = {}
-bot.last_reply_time = {}  # For global delay per channel
 
 bot.instructions = load_instructions()
 
@@ -139,8 +125,9 @@ def create_border(char="═"):
 def print_header():
     width = get_terminal_size()
     border = create_border()
-    title = "AI Selfbot by Najmul Fork by (Chaowalit)"
+    title = "AI Selfbot by Najmul"
     padding = " " * ((width - len(title) - 2) // 2)
+
     print(f"{Fore.CYAN}╔{border}╗")
     print(f"║{padding}{Style.BRIGHT}{title}{Style.NORMAL}{padding}║")
     print(f"╚{border}╝{Style.RESET_ALL}")
@@ -153,16 +140,21 @@ def print_separator():
 @bot.event
 async def on_ready():
     bot.selfbot_id = bot.user.id  # this has to be here, or else it won't work
+
     clear_console()
+
     print_header()
     print(
         f"AI Selfbot successfully logged in as {Fore.CYAN}{bot.user.name} ({bot.selfbot_id}){Style.RESET_ALL}.\n"
     )
+
     if update_available:
         print(
             f"{Fore.RED}A new version of the AI Selfbot is available! Please update to {latest_version} at: \nhttps://github.com/Najmul190/Discord-AI-Selfbot/releases/latest{Style.RESET_ALL}\n"
         )
+
     print("Active in the following channels:")
+
     for channel_id in bot.active_channels:
         channel = bot.get_channel(channel_id)
         if channel:
@@ -170,6 +162,11 @@ async def on_ready():
                 print(f"- #{channel.name} in {channel.guild.name}")
             except Exception:
                 pass
+
+    print(
+        f"\n{Fore.LIGHTBLACK_EX}Join the Discord server for support and news on updates: https://discord.gg/yUWmzQBV4P{Style.RESET_ALL}"
+    )
+
     print_separator()
 
 
@@ -186,6 +183,52 @@ def should_ignore_message(message):
     )
 
 
+def is_trigger_message(message):
+    mentioned = (
+        bot.user.mentioned_in(message)
+        and "@everyone" not in message.content
+        and "@here" not in message.content
+    )
+    replied_to = (
+        message.reference
+        and message.reference.resolved
+        and message.reference.resolved.author.id == bot.selfbot_id
+    )
+    is_dm = isinstance(message.channel, discord.DMChannel) and bot.allow_dm
+    is_group_dm = isinstance(message.channel, discord.GroupChannel) and bot.allow_gc
+
+    conv_key = f"{message.author.id}-{message.channel.id}"
+    in_conversation = (
+        conv_key in bot.active_conversations
+        and time.time() - bot.active_conversations[conv_key] < CONVERSATION_TIMEOUT
+        and bot.hold_conversation
+    )
+
+    content_has_trigger = any(
+        re.search(rf"\b{re.escape(keyword)}\b", message.content.lower())
+        for keyword in TRIGGER
+    )
+
+    if (
+        content_has_trigger
+        or mentioned
+        or replied_to
+        or is_dm
+        or is_group_dm
+        or in_conversation
+    ):
+        bot.active_conversations[conv_key] = time.time()
+
+    return (
+        content_has_trigger
+        or mentioned
+        or replied_to
+        or is_dm
+        or is_group_dm
+        or in_conversation
+    )
+
+
 def update_message_history(author_id, message_content):
     if author_id not in bot.message_history:
         bot.message_history[author_id] = []
@@ -193,174 +236,146 @@ def update_message_history(author_id, message_content):
     bot.message_history[author_id] = bot.message_history[author_id][-MAX_HISTORY:]
 
 
-# --- Time question helpers ---
-def is_time_question(msg):
-    msg = msg.lower()
-    return any(
-        kw in msg
-        for kw in [
-            "what time",
-            "time is it",
-            "current time",
-            "now time",
-        ]
-    )
-
-
-def get_thai_time_phrase():
-    tz = pytz.timezone("Asia/Bangkok")
-    now = datetime.now(tz)
-    hour = now.hour
-    minute = now.minute
-    if random.random() < 0.5:
-        # Phrase
-        if 5 <= hour < 12:
-            return random.choice(["morning", "it's morning"])
-        elif 12 <= hour < 17:
-            return random.choice(["afternoon", "it's afternoon"])
-        elif 17 <= hour < 20:
-            return random.choice(["evening", "it's evening"])
-        else:
-            return random.choice(["night", "it's night"])
-    else:
-        # Digital time
-        return f"{hour:02d}:{minute:02d} (Thailand time)"
-
-
 async def generate_response_and_reply(message, prompt, history, image_url=None):
-    user_name = message.author.name
-    filtered_history = [
-        h
-        for h in history
-        if h.get("content")
-        and isinstance(h["content"], str)
-        and h["content"].strip() != ""
-    ]
-    context_window = [h for h in filtered_history if h["role"] == "user"][-MAX_CONTEXT:]
-    if context_window:
-        combined_prompt = "\n".join([msg["content"] for msg in context_window])
-        last_user_message = context_window[-1]["content"]
+    if not bot.realistic_typing:
+        async with message.channel.typing():
+            if image_url:
+                response = await generate_response_image(
+                    prompt, bot.instructions, image_url, history
+                )
+            else:
+                response = await generate_response(prompt, bot.instructions, history)
     else:
-        combined_prompt = prompt
-        last_user_message = prompt
-
-    # --- Time question shortcut ---
-    if is_time_question(last_user_message):
-        time_reply = get_thai_time_phrase()
-        print(f"[AI-Selfbot] [TIME] Auto-answering time: {time_reply}")
-        await message.reply(time_reply)
-        key = f"{message.author.id}-{message.channel.id}"
-        bot.message_history[key].append({"role": "assistant", "content": time_reply})
-        return
-
-    # --- Context relevance check ---
-    def is_relevant_message(msg):
-        if not msg or len(msg.strip()) < 3:
-            return False
-        if all(c in "0123456789.,:;!?-_/\\ " for c in msg.strip()):
-            return False
-        if msg.strip().count("?") > 1 or all(c in "?!" for c in msg.strip()):
-            return False
-        return True
-
-    if not is_relevant_message(last_user_message):
-        print(
-            f"[AI-Selfbot] [SKIP] Message not relevant enough to reply: {last_user_message!r}"
-        )
-        return
-
-    # --- Sentiment/Intent Agent (filter) ---
-    filter_prompt = (
-        "You are a filter for a group chat AI. "
-        "If the following message is a normal, casual, or friendly question, joke, or statement a typical teenager would answer, reply with 'yes'. "
-        "If it's a hard question (like math, technical, homework, trivia, history, science, or something a regular person wouldn't answer), reply with 'no'. "
-        "If it's a question that needs book knowledge, facts, or is nerdy/smart (like 'Who is the smartest person ever?', 'Who invented the lightbulb?', 'What is the capital of France?'), reply with 'no'. "
-        "If it's spam, offensive, or out of character, reply with 'no'. "
-        "Examples:\n"
-        "Q: What's up? A: yes\n"
-        "Q: How are you? A: yes\n"
-        "Q: What is 37373/282? A: no\n"
-        "Q: Can you solve this equation? A: no\n"
-        "Q: Wanna play a game? A: yes\n"
-        "Q: You're so annoying! A: yes\n"
-        "Q: Tell me a joke! A: yes\n"
-        "Q: Who is the smartest person ever? A: no\n"
-        "Q: Who invented the lightbulb? A: no\n"
-        "Q: What is the capital of France? A: no\n"
-        "Q: Who won the world cup in 2018? A: no\n"
-        "Q: What's your favorite movie? A: yes\n"
-        f'Message: "{last_user_message}"'
-    )
-    print(f"[AI-Selfbot] [FILTER] Filter prompt: {filter_prompt}")
-    filter_result = await generate_response(filter_prompt, "", history=None)
-    print(f"[AI-Selfbot] [FILTER RESULT] {filter_result.strip()}")
-    if filter_result.strip().lower().startswith("no"):
-        print(f"[AI-Selfbot] [SKIP] Skipped hard/unusual question: {last_user_message}")
-        return
-
-    # --- Contextual Agent: Build context string ---
-    context_str = build_context_window(filtered_history, user_name)
-    instructions = load_instructions() + f"\n{context_str}"
-
-    # --- Main Agent ---
-    print(f"[AI-Selfbot] [MAIN AGENT] Instructions: {instructions}")
-    print(f"[AI-Selfbot] [MAIN AGENT] Prompt: {combined_prompt}")
-    if image_url:
-        response = await generate_response_image(
-            combined_prompt, instructions, image_url, filtered_history
-        )
-    else:
-        response = await generate_response(
-            combined_prompt, instructions, filtered_history
-        )
-    print(f"[AI-Selfbot] [MAIN AGENT] Response: {response}")
+        if image_url:
+            response = await generate_response_image(
+                prompt, bot.instructions, image_url, history
+            )
+        else:
+            response = await generate_response(prompt, bot.instructions, history)
 
     chunks = split_response(response)
-    fallback_replies = [
-        "idk bro",
-        "no clue fr",
-        "can't help with that bro",
-        "not sure tbh",
-    ]
-    sent = False
 
-    # Calculate a more realistic "thinking" delay
-    base_delay = random.uniform(8.0, 12.0)
-    if chunks:
-        total_length = sum(len(chunk) for chunk in chunks)
-        base_delay += min(8.0, math.log1p(total_length) / 2)
+    if len(chunks) > 3:
+        chunks = chunks[:3]
+        print(f"{datetime.now().strftime('[%H:%M:%S]')} Response too long, truncating.")
 
-    # If the AI failed, skip sending and log
-    if (
-        response is not None
-        and isinstance(response, str)
-        and response.strip() == "Sorry, I couldn't generate a response."
-    ):
+    for chunk in chunks:
+        if DISABLE_MENTIONS:
+            chunk = chunk.replace(
+                "@", "@\u200b"
+            )  # prevent mentions by replacing them with a hidden whitespace
+
+        if bot.anti_age_ban:
+            chunk = re.sub(
+                r"(?<!\d)([0-9]|1[0-2])(?!\d)|\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+                "\u200b",
+                chunk,
+                flags=re.IGNORECASE,
+            )
+
         print(
-            f"[AI-Selfbot] [SKIP] AI could not generate a response for: {last_message[:80]}"
+            f'{datetime.now().strftime("[%H:%M:%S]")} {message.author.name}: {prompt}'
         )
-        return
+        print(
+            f'{datetime.now().strftime("[%H:%M:%S]")} Responding to {message.author.name}: {chunk}'
+        )
+        print_separator()
 
-    print(f"[AI-Selfbot] [TYPING DELAY] Waiting {base_delay:.2f}s before replying...")
-    await asyncio.sleep(base_delay)
+        try:
+            if bot.realistic_typing:
+                await asyncio.sleep(random.randint(10, 30))
 
-    async with message.channel.typing():
-        for chunk in chunks:
-            if chunk.strip() == "":
+                async with message.channel.typing():
+                    characters_per_second = random.uniform(5.0, 6.0)
+                    await asyncio.sleep(
+                        int(len(chunk) / characters_per_second)
+                    )  # around 50-70 wpm which is average typing speed
+
+            try:
+                if isinstance(message.channel, discord.DMChannel):
+                    sent_message = await message.channel.send(chunk)
+                else:
+                    sent_message = await message.reply(
+                        chunk,
+                        mention_author=(True if config["bot"]["reply_ping"] else False),
+                    )
+
+                conv_key = f"{message.author.id}-{message.channel.id}"
+                bot.active_conversations[conv_key] = time.time()
+
+                if chunk == chunks[-1]:
+                    channel_id = message.channel.id
+                    batch_start_time = time.time()
+
+                    try:
+
+                        def check(m):
+                            return (
+                                m.author.id == message.author.id
+                                and m.channel.id == message.channel.id
+                                and not m.content.startswith(PREFIX)
+                            )
+
+                        if bot.hold_conversation:
+                            while time.time() - batch_start_time <= bot.batch_wait_time:
+                                try:
+                                    follow_up = await bot.wait_for(
+                                        "message",
+                                        timeout=bot.batch_wait_time
+                                        - (time.time() - batch_start_time),
+                                        check=check,
+                                    )
+
+                                    if follow_up.content.startswith(PREFIX):
+                                        await bot.process_commands(follow_up)
+                                        continue
+
+                                    if channel_id not in bot.message_queues:
+                                        bot.message_queues[channel_id] = deque()
+                                        bot.processing_locks[channel_id] = Lock()
+
+                                    bot.message_queues[channel_id].append(follow_up)
+
+                                except asyncio.TimeoutError:
+                                    break
+
+                    except asyncio.TimeoutError:
+                        pass
+
+                    if (
+                        bot.message_queues[channel_id]
+                        and not bot.processing_locks[channel_id].locked()
+                    ):
+                        asyncio.create_task(process_message_queue(channel_id))
+
+            except discord.errors.HTTPException as e:
                 print(
-                    f"[AI-Selfbot] [SKIP] AI returned empty string for: {last_message[:80]}"
+                    f"{datetime.now().strftime('[%H:%M:%S]')} Error replying to message, original message may have been deleted."
                 )
-                continue
-            print(f"[AI-Selfbot] [SEND] Sending chunk: {chunk}")
-            await asyncio.sleep(random.uniform(1.0, 3.0))
-            await message.reply(chunk)
-            sent = True
-        if not sent:
-            print(f"[AI-Selfbot] [NO REPLY] No reply sent for: {last_message[:80]}...")
+                print_separator()
 
-    if response and isinstance(response, str) and response.strip() != "":
-        key = f"{message.author.id}-{message.channel.id}"
-        bot.message_history[key].append({"role": "assistant", "content": response})
+                await webhook_log(message, e)
+            except discord.errors.Forbidden:
+                print(
+                    f"{datetime.now().strftime('[%H:%M:%S]')} Missing permissions to send message, bot may be muted."
+                )
+                print_separator()
+
+                await webhook_log(message, e)
+            except Exception as e:
+                print(f"{datetime.now().strftime('[%H:%M:%S]')} Error: {e}")
+                print_separator()
+
+                await webhook_log(message, e)
+        except discord.errors.Forbidden:
+            print(
+                f"{datetime.now().strftime('[%H:%M:%S]')} Missing permissions to send message, bot may be muted."
+            )
+            print_separator()
+
+            await webhook_log(
+                message, "Missing permissions to send message, bot may be muted."
+            )
 
     return response
 
@@ -379,8 +394,10 @@ async def on_message(message):
     current_time = time.time()
 
     batch_key = f"{user_id}-{channel_id}"
+    is_followup = batch_key in bot.user_message_batches
+    is_trigger = is_trigger_message(message)
 
-    if not bot.paused:
+    if (is_trigger or (is_followup and bot.hold_conversation)) and not bot.paused:
         if user_id in bot.user_cooldowns:
             cooldown_end = bot.user_cooldowns[user_id]
             if current_time < cooldown_end:
@@ -496,39 +513,10 @@ async def process_message_queue(channel_id):
             if key not in bot.message_history:
                 bot.message_history[key] = []
 
-            if combined_content and isinstance(combined_content, str):
-                bot.message_history[key].append(
-                    {"role": "user", "content": combined_content}
-                )
+            bot.message_history[key].append(
+                {"role": "user", "content": combined_content}
+            )
             history = bot.message_history[key]
-
-            # --- Improved Consecutive Reply Logic ---
-            # Count how many times the bot has replied in a row in this channel
-            consecutive_bot_replies = 0
-            for entry in reversed(history):
-                if entry["role"] == "assistant":
-                    consecutive_bot_replies += 1
-                elif entry["role"] == "user":
-                    break  # Someone else chatted, reset count
-
-            if consecutive_bot_replies >= 2:
-                print(
-                    f"[AI-Selfbot] [WAIT] Already replied {consecutive_bot_replies} times in a row in channel {channel_id}. Waiting for someone else to chat."
-                )
-                return
-
-            # --- Global delay between replies logic ---
-            now = time.time()
-            min_delay = 25  # seconds
-            max_delay = 40  # seconds
-            delay = random.uniform(min_delay, max_delay)
-            last_time = bot.last_reply_time.get(channel_id, 0)
-            if now - last_time < delay:
-                wait_time = delay - (now - last_time)
-                print(
-                    f"[AI-Selfbot] [WAIT] Waiting {wait_time:.2f}s before replying again in channel {channel_id}."
-                )
-                await asyncio.sleep(wait_time)
 
             if message_to_reply_to.channel.id in bot.active_channels or (
                 isinstance(message_to_reply_to.channel, discord.DMChannel)
@@ -537,11 +525,9 @@ async def process_message_queue(channel_id):
                 response = await generate_response_and_reply(
                     message_to_reply_to, combined_content, history, image_url
                 )
-                if response and isinstance(response, str) and response.strip() != "":
-                    bot.message_history[key].append(
-                        {"role": "assistant", "content": response}
-                    )
-                    bot.last_reply_time[channel_id] = time.time()
+                bot.message_history[key].append(
+                    {"role": "assistant", "content": response}
+                )
 
 
 async def load_extensions():

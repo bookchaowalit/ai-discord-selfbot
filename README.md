@@ -4,13 +4,13 @@ This is a [Python](https://www.python.org)-based Discord selfbot using the `disc
 
 > There is always the slight risk of a ban when using selfbots, so make sure to use this selfbot on an account you don't mind losing, but the risk is incredibly low and I have used it for over a year without any issues.
 
-### **⚠️ Important:**
+### **⚠️ Important:**  
 *I take no responsibility for any actions taken against your account for using these selfbots or how users use my open-source code.*
 
 
 <strong>Using this on a user account is prohibited by the [Discord TOS](https://discord.com/terms) and can lead to your account getting banned in _very_ rare cases.</strong>
 
-Project made by:
+Project made by: 
 
 <img style="vertical-align: center;" src="https://discord.c99.nl/widget/theme-4/451627446941515817.png"/>
 
@@ -95,7 +95,7 @@ You can also try out this project in our server, in the [#italiano](https://disc
 
 ### Step 5: Running the bot
 
-Windows:
+Windows: 
 
 - Simply run "Discord AI Selfbot.exe" and follow the instructions in the console to set up the bot.
 
@@ -169,7 +169,7 @@ Linux:
 
 # 💭 Changing the Personality of the bot
 
-To change the personality of the bot and set custom instructions, simply go into the `config` folder and edit the default instructions in `instructions.txt` to whatever you want!
+To change the personality of the bot and set custom instructions, simply go into the `config` folder and edit the default instructions in `instructions.txt` to whatever you want! 
 
 # ❤️ Donate
 
