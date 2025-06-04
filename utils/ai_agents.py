@@ -68,7 +68,6 @@ async def filter_agent(last_user_message):
 
 
 async def tone_context_agent(message, history):
-    # Classifies the message tone/context (step E)
     prompt = (
         "You are an agent that classifies the tone and context of a Discord message. "
         "Given the message and recent context, reply with 'casual', 'friendly', 'neutral', 'serious', 'off-topic', or 'other'.\n"
@@ -81,7 +80,6 @@ async def tone_context_agent(message, history):
 
 
 async def reply_validity_agent(reply):
-    # Checks if the generated reply is valid and non-empty (step I)
     prompt = (
         "You are an agent that checks if a Discord bot's reply is valid and non-empty. "
         "If the reply is appropriate, non-empty, and makes sense, reply 'yes'. Otherwise, reply 'no'.\n"
@@ -96,7 +94,15 @@ async def personalization_agent(reply):
     """
     Modifies the reply to sound like a Thai teenager with imperfect English,
     avoids bot-like language, and adds a personal touch.
+    Only personalizes if the reply is in English.
     """
+    is_english = await language_is_english_agent(reply)
+    if not is_english:
+        print(
+            "[AI-Selfbot] [PERSONALIZATION AGENT] Skipping personalization (not English)."
+        )
+        return reply
+
     prompt = (
         "You are a Thai teenager chatting in a Discord server. "
         "Your English is not perfect, and you sometimes mix in casual Thai words or slang. "
@@ -110,3 +116,17 @@ async def personalization_agent(reply):
     result = await generate_response(prompt, "", history=None)
     print(f"[AI-Selfbot] [PERSONALIZATION AGENT] {result.strip()}")
     return result.strip()
+
+
+async def language_is_english_agent(message_text):
+    """
+    Returns True if the message is English, False otherwise.
+    """
+    prompt = (
+        "You are a language detector. "
+        "If the following message is written in English, reply with 'true'. "
+        "If it is not English, reply with 'false'.\n"
+        f'Message: "{message_text}"'
+    )
+    result = await generate_response(prompt, "", history=None)
+    return result.strip().lower().startswith("true")
