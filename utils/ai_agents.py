@@ -1,132 +1,205 @@
 from utils.ai import generate_response
+from utils.prompts import (
+    ensure_english_agent_prompt,
+    filter_agent_prompt,
+    language_is_english_agent_prompt,
+    personalization_agent_prompt,
+    reply_to_reply_agent_prompt,
+    reply_validity_agent_prompt,
+    should_reply_agent_prompt,
+    tone_context_agent_prompt,
+)
+
+# Import agent_settings and broadcast_log from your FastAPI server
+try:
+    from utils.api_server import agent_settings, broadcast_log
+except ImportError:
+
+    async def broadcast_log(*args, **kwargs):
+        pass
+
+    agent_settings = {
+        "should_reply_agent": {"enabled": True},
+        "reply_to_reply_agent": {"enabled": True},
+        "filter_agent": {"enabled": True},
+        "tone_context_agent": {"enabled": True},
+        "reply_validity_agent": {"enabled": True},
+        "personalization_agent": {"enabled": True},
+        "language_is_english_agent": {"enabled": True},
+        "ensure_english_agent": {
+            "enabled": True,
+            "prompt": ensure_english_agent_prompt,
+        },
+    }
+
+
+def get_log_context(message=None):
+    """Helper to extract context for logging."""
+    if message is None:
+        return {}
+    return {
+        "channel_id": getattr(getattr(message, "channel", None), "id", None),
+        "message_id": getattr(message, "id", None),
+        "channel_name": getattr(getattr(message, "channel", None), "name", None),
+        "author_name": str(getattr(message, "author", None)),
+        "server_name": getattr(
+            getattr(getattr(message, "channel", None), "guild", None), "name", None
+        ),
+    }
 
 
 async def should_reply_agent(message, history):
+    if not agent_settings.get("should_reply_agent", {}).get("enabled", True):
+        return True
     context_snippet = ""
     if history:
         recent = history[-5:]
         context_snippet = "\n".join(
             f"{h.get('role','user')}: {h.get('content','')}" for h in recent
         )
-    should_reply_prompt = (
-        "You are an assistant that decides if a Discord bot should reply to a message in a group chat. "
-        "Given the recent conversation context, the message, and who is replying to whom, answer 'yes' if the bot should reply, "
-        "or 'no' if the bot should skip. Only reply 'yes' if the message is relevant, addressed to the bot, or the bot was involved recently.\n"
-        f"Recent context:\n{context_snippet}\n"
-        f'Current message: "{message.content}"\n'
-        f"Who is replying: {message.author}\n"
-        f"Who is being replied to: {getattr(getattr(message.reference, 'resolved', None), 'author', None) if message.reference and message.reference.resolved else 'None'}\n"
-        "Should the bot reply? (yes/no)"
-    )
-    agentic_decision = await generate_response(should_reply_prompt, "", history=None)
-    print(f"[AI-Selfbot] [SHOULD-REPLY AGENT] {agentic_decision.strip()}")
+    full_prompt = f"{should_reply_agent_prompt}\nRecent context:\n{context_snippet}\nMessage: {message.content}"
+    agentic_decision = await generate_response(full_prompt, "", history=None)
+    log_msg = f"[SHOULD-REPLY AGENT] {agentic_decision.strip()}"
+    print(f"[AI-Selfbot] {log_msg}")
+    await broadcast_log(log_msg, **get_log_context(message))
     return agentic_decision.strip().lower().startswith("yes")
 
 
-async def reply_to_reply_agent(message):
+async def reply_to_reply_agent(message, history=None):
+    if not agent_settings.get("reply_to_reply_agent", {}).get("enabled", True):
+        return True
     replied_to_content = getattr(getattr(message, "reference", None), "resolved", None)
     replied_to_content = getattr(replied_to_content, "content", "")
-    agent_prompt = (
-        "You are an assistant that decides if a Discord bot should reply to a message. "
-        "Given the previous message and the reply, answer 'yes' if the reply is directed at the bot or continues a conversation with the bot, "
-        "otherwise answer 'no'.\n"
-        f'Previous message: "{replied_to_content}"\n'
-        f'Reply: "{message.content}"\n'
-        "Should the bot reply? (yes/no)"
+    context_snippet = ""
+    if history:
+        recent = history[-5:]
+        context_snippet = "\n".join(
+            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
+        )
+    full_prompt = (
+        f"{reply_to_reply_agent_prompt}\nRecent context:\n{context_snippet}\n"
+        f'Previous message: "{replied_to_content}"\nReply: "{message.content}"'
     )
-    agent_result = await generate_response(agent_prompt, "", history=None)
-    print(f"[AI-Selfbot] [AGENTIC FILTER] {agent_result.strip()}")
+    agent_result = await generate_response(full_prompt, "", history=None)
+    log_msg = f"[AGENTIC FILTER] {agent_result.strip()}"
+    print(f"[AI-Selfbot] {log_msg}")
+    await broadcast_log(log_msg, **get_log_context(message))
     return agent_result.strip().lower().startswith("yes")
 
 
-async def filter_agent(last_user_message):
-    filter_prompt = (
-        "You are a filter for a group chat AI. "
-        "If the following message is a normal, casual, or friendly question, joke, or statement a typical teenager would answer, reply with 'yes'. "
-        "If it's a hard question (like math, technical, homework, trivia, history, science, or something a regular person wouldn't answer), reply with 'no'. "
-        "If it's a question that needs book knowledge, facts, or is nerdy/smart (like 'Who is the smartest person ever?', 'Who invented the lightbulb?', 'What is the capital of France?'), reply with 'no'. "
-        "If it's spam, offensive, or out of character, reply with 'no'. "
-        "Examples:\n"
-        "Q: What's up? A: yes\n"
-        "Q: How are you? A: yes\n"
-        "Q: What is 37373/282? A: no\n"
-        "Q: Can you solve this equation? A: no\n"
-        "Q: Wanna play a game? A: yes\n"
-        "Q: You're so annoying! A: yes\n"
-        "Q: Tell me a joke! A: yes\n"
-        "Q: Who is the smartest person ever? A: no\n"
-        "Q: Who invented the lightbulb? A: no\n"
-        "Q: What is the capital of France? A: no\n"
-        "Q: Who won the world cup in 2018? A: no\n"
-        "Q: What's your favorite movie? A: yes\n"
-        f'Message: "{last_user_message}"'
-    )
-    print(f"[AI-Selfbot] [FILTER] Filter prompt: {filter_prompt}")
-    filter_result = await generate_response(filter_prompt, "", history=None)
-    print(f"[AI-Selfbot] [FILTER RESULT] {filter_result.strip()}")
+async def filter_agent(last_user_message, message=None, history=None):
+    if not agent_settings.get("filter_agent", {}).get("enabled", True):
+        return True
+    context_snippet = ""
+    if history:
+        recent = history[-5:]
+        context_snippet = "\n".join(
+            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
+        )
+    full_prompt = f'{filter_agent_prompt}\nRecent context:\n{context_snippet}\nMessage: "{last_user_message}"'
+    print(f"[AI-Selfbot] [FILTER] Filter prompt: {full_prompt}")
+    filter_result = await generate_response(full_prompt, "", history=None)
+    log_msg = f"[FILTER RESULT] {filter_result.strip()}"
+    print(f"[AI-Selfbot] {log_msg}")
+    await broadcast_log(log_msg, **get_log_context(message))
     return filter_result.strip().lower().startswith("yes")
 
 
 async def tone_context_agent(message, history):
-    prompt = (
-        "You are an agent that classifies the tone and context of a Discord message. "
-        "Given the message and recent context, reply with 'casual', 'friendly', 'neutral', 'serious', 'off-topic', or 'other'.\n"
-        f"Recent context: {history[-5:] if history else 'None'}\n"
-        f'Message: "{message.content}"'
-    )
-    result = await generate_response(prompt, "", history=None)
-    print(f"[AI-Selfbot] [TONE/CONTEXT AGENT] {result.strip()}")
+    if not agent_settings.get("tone_context_agent", {}).get("enabled", True):
+        return "neutral"
+    context_snippet = ""
+    if history:
+        recent = history[-5:]
+        context_snippet = "\n".join(
+            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
+        )
+    full_prompt = f'{tone_context_agent_prompt}\nRecent context:\n{context_snippet}\nMessage: "{message.content}"'
+    result = await generate_response(full_prompt, "", history=None)
+    log_msg = f"[TONE/CONTEXT AGENT] {result.strip()}"
+    print(f"[AI-Selfbot] {log_msg}")
+    await broadcast_log(log_msg, **get_log_context(message))
     return result.strip().lower()
 
 
-async def reply_validity_agent(reply):
-    prompt = (
-        "You are an agent that checks if a Discord bot's reply is valid and non-empty. "
-        "If the reply is appropriate, non-empty, and makes sense, reply 'yes'. Otherwise, reply 'no'.\n"
-        f'Reply: "{reply}"'
-    )
-    result = await generate_response(prompt, "", history=None)
-    print(f"[AI-Selfbot] [REPLY VALIDITY AGENT] {result.strip()}")
+async def reply_validity_agent(reply, message=None, history=None):
+    if not agent_settings.get("reply_validity_agent", {}).get("enabled", True):
+        return True
+    context_snippet = ""
+    if history:
+        recent = history[-5:]
+        context_snippet = "\n".join(
+            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
+        )
+    full_prompt = f'{reply_validity_agent_prompt}\nRecent context:\n{context_snippet}\nReply: "{reply}"'
+    result = await generate_response(full_prompt, "", history=None)
+    log_msg = f"[REPLY VALIDITY AGENT] {result.strip()}"
+    print(f"[AI-Selfbot] {log_msg}")
+    await broadcast_log(log_msg, **get_log_context(message))
     return result.strip().lower().startswith("yes")
 
 
-async def personalization_agent(reply):
-    """
-    Modifies the reply to sound like a Thai teenager with imperfect English,
-    avoids bot-like language, and adds a personal touch.
-    Only personalizes if the reply is in English.
-    """
-    is_english = await language_is_english_agent(reply)
+async def personalization_agent(reply, message=None, history=None):
+    if not agent_settings.get("personalization_agent", {}).get("enabled", True):
+        return reply
+    is_english = await language_is_english_agent(reply, message=message)
     if not is_english:
-        print(
-            "[AI-Selfbot] [PERSONALIZATION AGENT] Skipping personalization (not English)."
-        )
+        log_msg = "[PERSONALIZATION AGENT] Skipping personalization (not English)."
+        print(f"[AI-Selfbot] {log_msg}")
+        await broadcast_log(log_msg, **get_log_context(message))
         return reply
 
-    prompt = (
-        "You are a Thai teenager chatting in a Discord server. "
-        "Your English is not perfect, and you sometimes mix in casual Thai words or slang. "
-        "You never reveal you are a bot or AI. "
-        "Rewrite the following reply to sound like a real Thai teenager, casual, friendly, and a bit playful. "
-        "If the reply is too formal or sounds like a bot, make it more natural and personal. "
-        "Never mention you are a bot or AI.\n"
-        f'Original reply: "{reply}"\n'
-        "Personalized reply:"
+    context_snippet = ""
+    if history:
+        recent = history[-5:]
+        context_snippet = "\n".join(
+            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
+        )
+    full_prompt = (
+        f"{personalization_agent_prompt}\nRecent context:\n{context_snippet}\n"
+        f'Original reply: "{reply}"\nPersonalized reply:'
     )
-    result = await generate_response(prompt, "", history=None)
-    print(f"[AI-Selfbot] [PERSONALIZATION AGENT] {result.strip()}")
+    result = await generate_response(full_prompt, "", history=None)
+    log_msg = f"[PERSONALIZATION AGENT] {result.strip()}"
+    print(f"[AI-Selfbot] {log_msg}")
+    await broadcast_log(log_msg, **get_log_context(message))
     return result.strip()
 
 
-async def language_is_english_agent(message_text):
-    """
-    Returns True if the message is English, False otherwise.
-    """
-    prompt = (
-        "You are a language detector. "
-        "If the following message is written in English, reply with 'true'. "
-        "If it is not English, reply with 'false'.\n"
-        f'Message: "{message_text}"'
-    )
-    result = await generate_response(prompt, "", history=None)
+async def language_is_english_agent(message_text, message=None, history=None):
+    if not agent_settings.get("language_is_english_agent", {}).get("enabled", True):
+        return True
+    context_snippet = ""
+    if history:
+        recent = history[-5:]
+        context_snippet = "\n".join(
+            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
+        )
+    full_prompt = f'{language_is_english_agent_prompt}\nRecent context:\n{context_snippet}\nMessage: "{message_text}"'
+    result = await generate_response(full_prompt, "", history=None)
+    log_msg = f"[LANGUAGE DETECT AGENT] {result.strip()}"
+    print(f"[AI-Selfbot] {log_msg}")
+    await broadcast_log(log_msg, **get_log_context(message))
     return result.strip().lower().startswith("true")
+
+
+async def ensure_english_agent(reply, message=None, history=None):
+    if not agent_settings.get("ensure_english_agent", {}).get("enabled", True):
+        return reply
+    is_english = await language_is_english_agent(
+        reply, message=message, history=history
+    )
+    if is_english:
+        return reply
+    context_snippet = ""
+    if history:
+        recent = history[-5:]
+        context_snippet = "\n".join(
+            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
+        )
+    full_prompt = f'{ensure_english_agent_prompt}\nRecent context:\n{context_snippet}\nMessage: "{reply}"'
+    translated = await generate_response(full_prompt, "", history=None)
+    log_msg = f"[ENSURE ENGLISH AGENT] {translated.strip()}"
+    print(f"[AI-Selfbot] {log_msg}")
+    await broadcast_log(log_msg, **get_log_context(message))
+    return translated.strip()

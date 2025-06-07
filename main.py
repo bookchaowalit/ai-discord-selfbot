@@ -8,7 +8,7 @@ import sys
 import time
 from asyncio import Lock
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 
 import discord
 import pytz
@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 from utils.ai import generate_response, generate_response_image, init_ai
 from utils.ai_agents import (
+    ensure_english_agent,
     filter_agent,
     language_is_english_agent,
     personalization_agent,
@@ -27,8 +28,8 @@ from utils.ai_agents import (
     should_reply_agent,
     tone_context_agent,
 )
-from utils.api_server import app, broadcast_log  # Import FastAPI app and broadcast_log
-from utils.db import get_channels, get_ignored_users, init_db
+from utils.api_server import app, broadcast_log
+from utils.db import add_message_history, get_channels, get_ignored_users, init_db
 from utils.error_notifications import webhook_log
 from utils.helpers import (
     clear_console,
@@ -244,6 +245,18 @@ def is_relevant_message(msg, history=None):
 
 async def generate_response_and_reply(message, prompt, history, image_url=None):
     user_name = message.author.name
+    channel_id = message.channel.id
+    message_id = message.id
+    channel_name = getattr(message.channel, "name", str(channel_id))
+
+    async def log(msg):
+        await broadcast_log(
+            msg,
+            channel_id=channel_id,
+            message_id=message_id,
+            channel_name=channel_name,
+        )
+
     filtered_history = [
         h
         for h in history
@@ -260,11 +273,11 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         last_user_message = prompt
 
     # --- Language Detection Agent ---
-    is_english = await language_is_english_agent(last_user_message)
-    await broadcast_log(f"[LANGUAGE DETECT] English? {is_english}")
+    is_english = await language_is_english_agent(last_user_message, message)
+    await log(f"[LANGUAGE DETECT] English? {is_english}")
     print(f"[AI-Selfbot] [LANGUAGE DETECT] English? {is_english}")
     if not is_english:
-        await broadcast_log(
+        await log(
             "[LANGUAGE DETECT] Message is not English, skipping or handle with another agent."
         )
         print(
@@ -278,21 +291,19 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         replied_to_author = getattr(replied_to, "author", None)
         replied_to_content = getattr(replied_to, "content", None)
         if replied_to_author:
-            await broadcast_log(
+            await log(
                 f'[REPLY LOG] {message.author} is replying to {replied_to_author}: "{replied_to_content}"'
             )
             print(
                 f'[AI-Selfbot] [REPLY LOG] {message.author} is replying to {replied_to_author}: "{replied_to_content}"'
             )
         else:
-            await broadcast_log(
-                f"[REPLY LOG] {message.author} is replying to an unknown user"
-            )
+            await log(f"[REPLY LOG] {message.author} is replying to an unknown user")
             print(
                 f"[AI-Selfbot] [REPLY LOG] {message.author} is replying to an unknown user"
             )
     else:
-        await broadcast_log(
+        await log(
             f"[REPLY LOG] {message.author} is sending a new message (not a reply)"
         )
         print(
@@ -301,25 +312,23 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
 
     # --- Tone/Context Agent ---
     tone = await tone_context_agent(message, history)
-    await broadcast_log(f"[TONE/CONTEXT] {tone}")
+    await log(f"[TONE/CONTEXT] {tone}")
     print(f"[AI-Selfbot] [TONE/CONTEXT] {tone}")
 
     # --- Should-I-Reply Agentic AI ---
     should_reply = await should_reply_agent(message, history)
-    await broadcast_log(f"[SHOULD REPLY] {should_reply}")
+    await log(f"[SHOULD REPLY] {should_reply}")
     if not should_reply:
-        await broadcast_log("[SKIP] Should-Reply agent decided to skip this message.")
+        await log("[SKIP] Should-Reply agent decided to skip this message.")
         print("[AI-Selfbot] [SKIP] Should-Reply agent decided to skip this message.")
         return
 
     # --- Agentic AI: Should the bot reply to this reply? (legacy, optional) ---
     if message.reference and message.reference.resolved:
         should_reply_to_reply = await reply_to_reply_agent(message)
-        await broadcast_log(f"[SHOULD REPLY TO REPLY] {should_reply_to_reply}")
+        await log(f"[SHOULD REPLY TO REPLY] {should_reply_to_reply}")
         if not should_reply_to_reply:
-            await broadcast_log(
-                "[SKIP] Agentic AI decided not to reply to this message."
-            )
+            await log("[SKIP] Agentic AI decided not to reply to this message.")
             print(
                 "[AI-Selfbot] [SKIP] Agentic AI decided not to reply to this message."
             )
@@ -328,7 +337,7 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     # --- Time question shortcut ---
     if is_time_question(last_user_message):
         time_reply = get_thai_time_phrase()
-        await broadcast_log(f"[TIME] Auto-answering time: {time_reply}")
+        await log(f"[TIME] Auto-answering time: {time_reply}")
         print(f"[AI-Selfbot] [TIME] Auto-answering time: {time_reply}")
         await message.reply(time_reply)
         key = f"{message.author.id}-{message.channel.id}"
@@ -337,21 +346,17 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
 
     # --- Context relevance check ---
     if not is_relevant_message(last_user_message, history):
-        await broadcast_log(
-            f"[SKIP] Message not relevant enough to reply: {last_user_message!r}"
-        )
+        await log(f"[SKIP] Message not relevant enough to reply: {last_user_message!r}")
         print(
             f"[AI-Selfbot] [SKIP] Message not relevant enough to reply: {last_user_message!r}"
         )
         return
 
     # --- Sentiment/Intent Agent (filter) ---
-    should_filter = await filter_agent(last_user_message)
-    await broadcast_log(f"[FILTER] {should_filter}")
+    should_filter = await filter_agent(last_user_message, message)
+    await log(f"[FILTER] {should_filter}")
     if not should_filter:
-        await broadcast_log(
-            f"[SKIP] Skipped hard/unusual question: {last_user_message}"
-        )
+        await log(f"[SKIP] Skipped hard/unusual question: {last_user_message}")
         print(f"[AI-Selfbot] [SKIP] Skipped hard/unusual question: {last_user_message}")
         return
 
@@ -360,8 +365,8 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     instructions = load_instructions() + f"\n{context_str}"
 
     # --- Main Agent ---
-    await broadcast_log(f"[MAIN AGENT] Instructions: {instructions}")
-    await broadcast_log(f"[MAIN AGENT] Prompt: {combined_prompt}")
+    await log(f"[MAIN AGENT] Instructions: {instructions}")
+    await log(f"[MAIN AGENT] Prompt: {combined_prompt}")
     print(f"[AI-Selfbot] [MAIN AGENT] Instructions: {instructions}")
     print(f"[AI-Selfbot] [MAIN AGENT] Prompt: {combined_prompt}")
     if image_url:
@@ -372,25 +377,28 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         response = await generate_response(
             combined_prompt, instructions, filtered_history
         )
-    await broadcast_log(f"[MAIN AGENT] Response: {response}")
+    await log(f"[MAIN AGENT] Response: {response}")
     print(f"[AI-Selfbot] [MAIN AGENT] Response: {response}")
 
     # --- Personalization Agent ---
-    response = await personalization_agent(response)
-    await broadcast_log(f"[PERSONALIZED RESPONSE] {response}")
+    response = await personalization_agent(response, message)
+    await log(f"[PERSONALIZED RESPONSE] {response}")
     print(f"[AI-Selfbot] [PERSONALIZED RESPONSE] {response}")
 
     # --- Reply Validity Agent ---
-    is_valid = await reply_validity_agent(response)
-    await broadcast_log(f"[REPLY VALIDITY] {is_valid}")
+    is_valid = await reply_validity_agent(response, message)
+    await log(f"[REPLY VALIDITY] {is_valid}")
     if not is_valid:
-        await broadcast_log(
-            f"[SKIP] Reply validity agent: reply is not valid/non-empty."
-        )
+        await log(f"[SKIP] Reply validity agent: reply is not valid/non-empty.")
         print(
             f"[AI-Selfbot] [SKIP] Reply validity agent: reply is not valid/non-empty."
         )
         return
+
+    # --- Ensure English Agent ---
+    response = await ensure_english_agent(response, message)
+    await log(f"[ENSURE ENGLISH AGENT] {response}")
+    print(f"[AI-Selfbot] [ENSURE ENGLISH AGENT] {response}")
 
     chunks = split_response(response)
     sent = False
@@ -406,7 +414,7 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         and isinstance(response, str)
         and response.strip() == "Sorry, I couldn't generate a response."
     ):
-        await broadcast_log(
+        await log(
             f"[SKIP] AI could not generate a response for: {last_user_message[:80]}"
         )
         print(
@@ -414,32 +422,33 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         )
         return
 
-    await broadcast_log(f"[TYPING DELAY] Waiting {base_delay:.2f}s before replying...")
+    await log(f"[TYPING DELAY] Waiting {base_delay:.2f}s before replying...")
     print(f"[AI-Selfbot] [TYPING DELAY] Waiting {base_delay:.2f}s before replying...")
     await asyncio.sleep(base_delay)
 
     async with message.channel.typing():
         for chunk in chunks:
             if chunk.strip() == "":
-                await broadcast_log(
-                    f"[SKIP] AI returned empty string for: {last_user_message[:80]}"
-                )
-                print(
-                    f"[AI-Selfbot] [SKIP] AI returned empty string for: {last_user_message[:80]}"
-                )
                 continue
-            await broadcast_log(f"[SEND] Sending chunk: {chunk}")
+            await log(f"[SEND] Sending chunk: {chunk}")
             print(f"[AI-Selfbot] [SEND] Sending chunk: {chunk}")
             await asyncio.sleep(random.uniform(1.0, 3.0))
             await message.reply(chunk)
             sent = True
-        if not sent:
-            await broadcast_log(
-                f"[NO REPLY] No reply sent for: {last_user_message[:80]}..."
-            )
-            print(
-                f"[AI-Selfbot] [NO REPLY] No reply sent for: {last_user_message[:80]}..."
-            )
+
+            # --- Store AI response in DB if in active_channels ---
+            if message.channel.id in bot.active_channels:
+                add_message_history(
+                    channel_id=message.channel.id,
+                    channel_name=getattr(message.channel, "name", None),
+                    user_id=bot.owner_id,
+                    user_name=str(bot.user) if hasattr(bot, "user") else "selfbot",
+                    message=chunk,
+                    replied_user=message.author.id,
+                    tagged_me=False,
+                    is_owner=True,
+                    timestamp=datetime.now(timezone.utc),
+                )
 
     if response and isinstance(response, str) and response.strip() != "":
         key = f"{message.author.id}-{message.channel.id}"
@@ -452,6 +461,25 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
 async def on_message(message):
     if should_ignore_message(message) and not message.author.id == bot.owner_id:
         return
+
+    # --- Store message history in DB (only for active_channels) ---
+    if message.channel.id in bot.active_channels:
+        if message.reference and getattr(message.reference, "resolved", None):
+            replied_user = getattr(message.reference.resolved.author, "id", None)
+        else:
+            replied_user = None
+
+        add_message_history(
+            channel_id=message.channel.id,
+            channel_name=getattr(message.channel, "name", None),
+            user_id=message.author.id,
+            user_name=str(message.author),
+            message=message.content,
+            replied_user=replied_user,
+            tagged_me=bot.user in message.mentions if hasattr(bot, "user") else False,
+            is_owner=(message.author.id == bot.owner_id),
+            timestamp=datetime.now(timezone.utc),
+        )
 
     if message.content.startswith(PREFIX):
         await bot.process_commands(message)
@@ -670,10 +698,7 @@ async def run_bot():
     await bot.start(TOKEN)
 
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(run_bot())
-
+# Lifespan event is now handled in utils/api_server.py, so you do not need @app.on_event here.
 
 # --- Do not run bot.run() here! ---
 # To start everything, run:
