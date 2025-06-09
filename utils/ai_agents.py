@@ -1,7 +1,11 @@
 from utils.ai import generate_response
 from utils.prompts import (
+    analyze_history_prompt,
+    consistency_agent_prompt,
+    contextual_response_prompt,
     ensure_english_agent_prompt,
     filter_agent_prompt,
+    final_compact_agent_prompt,
     language_is_english_agent_prompt,
     personalization_agent_prompt,
     reply_to_reply_agent_prompt,
@@ -184,3 +188,56 @@ async def ensure_english_agent(reply, message=None, history=None):
     print(f"[AI-Selfbot] {log_msg}")
     await broadcast_log(log_msg, **get_log_context(message))
     return translated.strip()
+
+
+async def analyze_history_agent(user_message, history):
+    context_snippet = ""
+    if history:
+        recent = history[-6:]
+        context_snippet = "\n".join(
+            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
+        )
+    prompt = (
+        f"{analyze_history_prompt}\n"
+        f"Recent conversation:\n{context_snippet}\n"
+        f'User\'s latest message: "{user_message}"\n'
+        f"Summary:"
+    )
+    result = await generate_response(prompt, "", history=None)
+    return result.strip()
+
+
+async def contextual_response_agent(summary, user_message, history):
+    context_snippet = ""
+    if history:
+        recent = history[-6:]
+        context_snippet = "\n".join(
+            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
+        )
+    prompt = (
+        f"{contextual_response_prompt}\n"
+        f"Conversation summary: {summary}\n"
+        f"Recent conversation:\n{context_snippet}\n"
+        f'User\'s latest message: "{user_message}"\n'
+        f"Bot's reply:"
+    )
+    result = await generate_response(prompt, "", history=None)
+    return result.strip()
+
+
+async def consistency_agent(summary, user_message, bot_reply):
+    prompt = (
+        f"{consistency_agent_prompt}\n"
+        f"Conversation summary: {summary}\n"
+        f'User\'s latest message: "{user_message}"\n'
+        f'Bot\'s reply: "{bot_reply}"\n'
+        f"Does the reply match the context and summary? If not, suggest a better reply. If yes, reply with 'OK'."
+    )
+    result = await generate_response(prompt, "", history=None)
+    return result.strip()
+
+
+async def final_compact_agent(reply):
+    prompt = f"{final_compact_agent_prompt}\n" f'Reply: "{reply}"\n' f"Shortened reply:"
+    result = await generate_response(prompt, "", history=None)
+    return result.strip()

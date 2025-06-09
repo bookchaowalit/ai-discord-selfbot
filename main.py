@@ -19,8 +19,12 @@ from dotenv import load_dotenv
 
 from utils.ai import generate_response, generate_response_image, init_ai
 from utils.ai_agents import (
+    analyze_history_agent,
+    consistency_agent,
+    contextual_response_agent,
     ensure_english_agent,
     filter_agent,
+    final_compact_agent,
     language_is_english_agent,
     personalization_agent,
     reply_to_reply_agent,
@@ -220,28 +224,6 @@ def get_thai_time_phrase():
         return f"{hour:02d}:{minute:02d} (Thailand time)"
 
 
-def is_relevant_message(msg, history=None):
-    msg_lower = msg.lower().strip()
-    if not msg or len(msg_lower) < 3:
-        return False
-    if all(c in "0123456789.,:;!?-_/\\ " for c in msg_lower):
-        return False
-    if msg_lower.count("?") > 1 or all(c in "?!" for c in msg_lower):
-        return False
-    url_pattern = r"^(https?://\S+)$"
-    if re.match(url_pattern, msg_lower):
-        return False
-    gratitude_phrases = ["thank you", "thanks", "thx", "ขอบคุณ", "ขอบใจ"]
-    if any(phrase in msg_lower for phrase in gratitude_phrases):
-        if history:
-            recent = history[-5:]
-            for entry in reversed(recent):
-                if entry.get("role") == "assistant":
-                    return True
-        return False
-    return True
-
-
 async def generate_response_and_reply(message, prompt, history, image_url=None):
     user_name = message.author.name
     channel_id = message.channel.id
@@ -271,94 +253,22 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         combined_prompt = prompt
         last_user_message = prompt
 
-    # --- Language Detection Agent ---
-    is_english = await language_is_english_agent(last_user_message, message)
-    await log(f"[LANGUAGE DETECT] English? {is_english}")
-    print(f"[AI-Selfbot] [LANGUAGE DETECT] English? {is_english}")
-    if not is_english:
-        await log(
-            "[LANGUAGE DETECT] Message is not English, skipping or handle with another agent."
-        )
-        print(
-            "[AI-Selfbot] [LANGUAGE DETECT] Message is not English, skipping or handle with another agent."
-        )
-        return
+    # --- 1. Analyze history and summarize context ---
+    summary = await analyze_history_agent(last_user_message, history)
+    print(f"[AI-Selfbot] [HISTORY SUMMARY] {summary}")
+    await log(f"[HISTORY SUMMARY] {summary}")
 
-    # --- Log who is replying to whom and what ---
-    if message.reference and message.reference.resolved:
-        replied_to = message.reference.resolved
-        replied_to_author = getattr(replied_to, "author", None)
-        replied_to_content = getattr(replied_to, "content", None)
-        if replied_to_author:
-            await log(
-                f'[REPLY LOG] {message.author} is replying to {replied_to_author}: "{replied_to_content}"'
-            )
-            print(
-                f'[AI-Selfbot] [REPLY LOG] {message.author} is replying to {replied_to_author}: "{replied_to_content}"'
-            )
-        else:
-            await log(f"[REPLY LOG] {message.author} is replying to an unknown user")
-            print(
-                f"[AI-Selfbot] [REPLY LOG] {message.author} is replying to an unknown user"
-            )
-    else:
-        await log(
-            f"[REPLY LOG] {message.author} is sending a new message (not a reply)"
-        )
-        print(
-            f"[AI-Selfbot] [REPLY LOG] {message.author} is sending a new message (not a reply)"
-        )
+    # --- 2. Generate a context-aware reply using the summary ---
+    response = await contextual_response_agent(summary, last_user_message, history)
+    await log(f"[CONTEXTUAL RESPONSE] {response}")
+    print(f"[AI-Selfbot] [CONTEXTUAL RESPONSE] {response}")
 
-    # --- Tone/Context Agent ---
-    tone = await tone_context_agent(message, history)
-    await log(f"[TONE/CONTEXT] {tone}")
-    print(f"[AI-Selfbot] [TONE/CONTEXT] {tone}")
-
-    # --- Time question shortcut ---
-    if is_time_question(last_user_message):
-        time_reply = get_thai_time_phrase()
-        await log(f"[TIME] Auto-answering time: {time_reply}")
-        print(f"[AI-Selfbot] [TIME] Auto-answering time: {time_reply}")
-        await message.reply(time_reply)
-        key = f"{message.author.id}-{message.channel.id}"
-        bot.message_history[key].append({"role": "assistant", "content": time_reply})
-        return
-
-    # --- Context relevance check ---
-    if not is_relevant_message(last_user_message, history):
-        await log(f"[SKIP] Message not relevant enough to reply: {last_user_message!r}")
-        print(
-            f"[AI-Selfbot] [SKIP] Message not relevant enough to reply: {last_user_message!r}"
-        )
-        return
-
-    # --- Sentiment/Intent Agent (filter) ---
-    should_filter = await filter_agent(last_user_message, message)
-    await log(f"[FILTER] {should_filter}")
-    if not should_filter:
-        await log(f"[SKIP] Skipped hard/unusual question: {last_user_message}")
-        print(f"[AI-Selfbot] [SKIP] Skipped hard/unusual question: {last_user_message}")
-        return
-
-    # --- Contextual Agent: Build context string ---
-    context_str = build_context_window(filtered_history, user_name)
-    instructions = load_instructions() + f"\n{context_str}"
-
-    # --- Main Agent ---
-    await log(f"[MAIN AGENT] Instructions: {instructions}")
-    await log(f"[MAIN AGENT] Prompt: {combined_prompt}")
-    print(f"[AI-Selfbot] [MAIN AGENT] Instructions: {instructions}")
-    print(f"[AI-Selfbot] [MAIN AGENT] Prompt: {combined_prompt}")
-    if image_url:
-        response = await generate_response_image(
-            combined_prompt, instructions, image_url, filtered_history
-        )
-    else:
-        response = await generate_response(
-            combined_prompt, instructions, filtered_history
-        )
-    await log(f"[MAIN AGENT] Response: {response}")
-    print(f"[AI-Selfbot] [MAIN AGENT] Response: {response}")
+    # --- Consistency Agent ---
+    consistency_result = await consistency_agent(summary, last_user_message, response)
+    await log(f"[CONSISTENCY AGENT] {consistency_result}")
+    if consistency_result != "OK":
+        response = consistency_result  # Use the suggested better reply
+        await log(f"[CONSISTENCY AGENT] Using improved reply: {response}")
 
     # --- Personalization Agent ---
     response = await personalization_agent(response, message)
@@ -379,6 +289,10 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     response = await ensure_english_agent(response, message)
     await log(f"[ENSURE ENGLISH AGENT] {response}")
     print(f"[AI-Selfbot] [ENSURE ENGLISH AGENT] {response}")
+
+    response = await final_compact_agent(response)
+    await log(f"[FINAL COMPACT AGENT] {response}")
+    print(f"[AI-Selfbot] [FINAL COMPACT AGENT] {response}")
 
     chunks = split_response(response)
     sent = False
