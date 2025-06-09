@@ -13,7 +13,6 @@ from utils.prompts import (  # Import prompts from prompts.py
     personalization_agent_prompt,
     reply_to_reply_agent_prompt,
     reply_validity_agent_prompt,
-    should_reply_agent_prompt,
     tone_context_agent_prompt,
 )
 
@@ -87,10 +86,6 @@ async def broadcast_log(
 
 # Agent settings with prompts
 agent_settings = {
-    "should_reply_agent": {
-        "enabled": True,
-        "prompt": should_reply_agent_prompt,
-    },
     "reply_to_reply_agent": {
         "enabled": True,
         "prompt": reply_to_reply_agent_prompt,

@@ -6,7 +6,6 @@ from utils.prompts import (
     personalization_agent_prompt,
     reply_to_reply_agent_prompt,
     reply_validity_agent_prompt,
-    should_reply_agent_prompt,
     tone_context_agent_prompt,
 )
 
@@ -19,7 +18,6 @@ except ImportError:
         pass
 
     agent_settings = {
-        "should_reply_agent": {"enabled": True},
         "reply_to_reply_agent": {"enabled": True},
         "filter_agent": {"enabled": True},
         "tone_context_agent": {"enabled": True},
@@ -46,23 +44,6 @@ def get_log_context(message=None):
             getattr(getattr(message, "channel", None), "guild", None), "name", None
         ),
     }
-
-
-async def should_reply_agent(message, history):
-    if not agent_settings.get("should_reply_agent", {}).get("enabled", True):
-        return True
-    context_snippet = ""
-    if history:
-        recent = history[-5:]
-        context_snippet = "\n".join(
-            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
-        )
-    full_prompt = f"{should_reply_agent_prompt}\nRecent context:\n{context_snippet}\nMessage: {message.content}"
-    agentic_decision = await generate_response(full_prompt, "", history=None)
-    log_msg = f"[SHOULD-REPLY AGENT] {agentic_decision.strip()}"
-    print(f"[AI-Selfbot] {log_msg}")
-    await broadcast_log(log_msg, **get_log_context(message))
-    return agentic_decision.strip().lower().startswith("yes")
 
 
 async def reply_to_reply_agent(message, history=None):

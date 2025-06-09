@@ -16,98 +16,127 @@ DB_PASS = os.getenv("POSTGRES_PASSWORD", "")
 
 
 def get_conn():
-    return psycopg2.connect(
-        host=DB_HOST,
-        port=DB_PORT,
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASS,
-        cursor_factory=RealDictCursor,
-    )
+    try:
+        return psycopg2.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASS,
+            cursor_factory=RealDictCursor,
+        )
+    except Exception as e:
+        print(f"[DB ERROR] Could not connect to database: {e}")
+        raise
 
 
 def init_db():
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS channels (
-                    id BIGINT PRIMARY KEY
-                );
-            """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS ignored_users (
-                    id BIGINT PRIMARY KEY
-                );
-            """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS message_history (
-                    id SERIAL PRIMARY KEY,
-                    channel_id BIGINT,
-                    user_id BIGINT,
-                    message TEXT,
-                    replied_me BOOLEAN,
-                    timestamp TIMESTAMPTZ DEFAULT NOW(),
-                    tagged_me BOOLEAN,
-                    is_owner BOOLEAN
-                );
-            """
-            )
-        conn.commit()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS channels (
+                        id BIGINT PRIMARY KEY
+                    );
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS ignored_users (
+                        id BIGINT PRIMARY KEY
+                    );
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS message_history (
+                        id SERIAL PRIMARY KEY,
+                        channel_id BIGINT,
+                        channel_name TEXT,
+                        user_id BIGINT,
+                        user_name TEXT,
+                        message TEXT,
+                        replied_user BIGINT,
+                        timestamp TIMESTAMPTZ DEFAULT NOW(),
+                        tagged_me BOOLEAN,
+                        is_owner BOOLEAN
+                    );
+                    """
+                )
+            conn.commit()
+    except Exception as e:
+        print(f"[DB ERROR] init_db failed: {e}")
 
 
 def add_channel(channel_id):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO channels (id) VALUES (%s) ON CONFLICT DO NOTHING",
-                (channel_id,),
-            )
-        conn.commit()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO channels (id) VALUES (%s) ON CONFLICT DO NOTHING",
+                    (channel_id,),
+                )
+            conn.commit()
+    except Exception as e:
+        print(f"[DB ERROR] add_channel failed: {e}")
 
 
 def remove_channel(channel_id):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM channels WHERE id = %s", (channel_id,))
-        conn.commit()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM channels WHERE id = %s", (channel_id,))
+            conn.commit()
+    except Exception as e:
+        print(f"[DB ERROR] remove_channel failed: {e}")
 
 
 def get_channels():
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM channels")
-            rows = cur.fetchall()
-            return [row["id"] for row in rows]
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM channels")
+                rows = cur.fetchall()
+                return [row["id"] for row in rows]
+    except Exception as e:
+        print(f"[DB ERROR] get_channels failed: {e}")
+        return []
 
 
 def add_ignored_user(user_id):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO ignored_users (id) VALUES (%s) ON CONFLICT DO NOTHING",
-                (user_id,),
-            )
-        conn.commit()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO ignored_users (id) VALUES (%s) ON CONFLICT DO NOTHING",
+                    (user_id,),
+                )
+            conn.commit()
+    except Exception as e:
+        print(f"[DB ERROR] add_ignored_user failed: {e}")
 
 
 def remove_ignored_user(user_id):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM ignored_users WHERE id = %s", (user_id,))
-        conn.commit()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM ignored_users WHERE id = %s", (user_id,))
+            conn.commit()
+    except Exception as e:
+        print(f"[DB ERROR] remove_ignored_user failed: {e}")
 
 
 def get_ignored_users():
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM ignored_users")
-            rows = cur.fetchall()
-            return [row["id"] for row in rows]
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM ignored_users")
+                rows = cur.fetchall()
+                return [row["id"] for row in rows]
+    except Exception as e:
+        print(f"[DB ERROR] get_ignored_users failed: {e}")
+        return []
 
 
 def add_message_history(
@@ -123,29 +152,32 @@ def add_message_history(
 ):
     if timestamp is None:
         timestamp = datetime.datetime.now(datetime.timezone.utc)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO message_history (
-                    channel_id, channel_name, user_id, user_name, message,
-                    replied_user, timestamp, tagged_me, is_owner
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO message_history (
+                        channel_id, channel_name, user_id, user_name, message,
+                        replied_user, timestamp, tagged_me, is_owner
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        channel_id,
+                        channel_name,
+                        user_id,
+                        user_name,
+                        message,
+                        replied_user,
+                        timestamp,
+                        tagged_me,
+                        is_owner,
+                    ),
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    channel_id,
-                    channel_name,
-                    user_id,
-                    user_name,
-                    message,
-                    replied_user,
-                    timestamp,
-                    tagged_me,
-                    is_owner,
-                ),
-            )
-        conn.commit()
+            conn.commit()
+    except Exception as e:
+        print(f"[DB ERROR] add_message_history failed: {e}")
 
 
 def get_message_history(channel_id=None, user_id=None, limit=50):
@@ -162,7 +194,11 @@ def get_message_history(channel_id=None, user_id=None, limit=50):
         query += " WHERE " + " AND ".join(conditions)
     query += " ORDER BY timestamp DESC LIMIT %s"
     params.append(limit)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, tuple(params))
-            return cur.fetchall()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, tuple(params))
+                return cur.fetchall()
+    except Exception as e:
+        print(f"[DB ERROR] get_message_history failed: {e}")
+        return []

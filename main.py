@@ -25,7 +25,6 @@ from utils.ai_agents import (
     personalization_agent,
     reply_to_reply_agent,
     reply_validity_agent,
-    should_reply_agent,
     tone_context_agent,
 )
 from utils.api_server import app, broadcast_log
@@ -314,25 +313,6 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     tone = await tone_context_agent(message, history)
     await log(f"[TONE/CONTEXT] {tone}")
     print(f"[AI-Selfbot] [TONE/CONTEXT] {tone}")
-
-    # --- Should-I-Reply Agentic AI ---
-    should_reply = await should_reply_agent(message, history)
-    await log(f"[SHOULD REPLY] {should_reply}")
-    if not should_reply:
-        await log("[SKIP] Should-Reply agent decided to skip this message.")
-        print("[AI-Selfbot] [SKIP] Should-Reply agent decided to skip this message.")
-        return
-
-    # --- Agentic AI: Should the bot reply to this reply? (legacy, optional) ---
-    if message.reference and message.reference.resolved:
-        should_reply_to_reply = await reply_to_reply_agent(message)
-        await log(f"[SHOULD REPLY TO REPLY] {should_reply_to_reply}")
-        if not should_reply_to_reply:
-            await log("[SKIP] Agentic AI decided not to reply to this message.")
-            print(
-                "[AI-Selfbot] [SKIP] Agentic AI decided not to reply to this message."
-            )
-            return
 
     # --- Time question shortcut ---
     if is_time_question(last_user_message):

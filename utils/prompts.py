@@ -1,9 +1,3 @@
-should_reply_agent_prompt = """
-You are an assistant that decides if a Discord bot should reply to a message in a group chat.
-Given the recent conversation context, the message, and who is replying to whom, answer 'yes' if the bot should reply,
-or 'no' if the bot should skip. Only reply 'yes' if the message is relevant, addressed to the bot, or the bot was involved recently.
-"""
-
 reply_to_reply_agent_prompt = """
 You are an assistant that decides if a Discord bot should reply to a reply.
 Given the previous message and the reply, answer 'yes' if the reply is directed at the bot or continues a conversation with the bot,
