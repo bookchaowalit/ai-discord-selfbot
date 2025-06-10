@@ -587,6 +587,34 @@ async def load_extensions():
                 print(f"Error loading cog {cog_name}: {e}")
 
 
+def patched_get_build_number(session):
+    async def inner(session):
+        try:
+            login_page_request = await session.get(
+                "https://discord.com/login", timeout=7
+            )
+            login_page = await login_page_request.text()
+            matches = re.findall(r'href="/assets/([a-z0-9]+)\.js"', login_page)
+            if not matches:
+                return 9999
+            build_asset = matches[0]
+            build_url = f"https://discord.com/assets/{build_asset}.js"
+            build_request = await session.get(build_url, timeout=7)
+            build_file = await build_request.text()
+            build_index = build_file.find("buildNumber") + 24
+            return int(build_file[build_index : build_index + 6])
+        except Exception:
+            return 9999
+
+    return inner
+
+
+# Patch the function at runtime
+import discord.utils
+
+discord.utils._get_build_number = patched_get_build_number(None)
+
+
 # --- FastAPI Startup: Run Discord Bot as a background task ---
 async def run_bot():
     await bot.start(TOKEN)
