@@ -202,3 +202,35 @@ def get_message_history(channel_id=None, user_id=None, limit=50):
     except Exception as e:
         print(f"[DB ERROR] get_message_history failed: {e}")
         return []
+
+
+def count_consecutive_bot_replies(channel_id, bot_user_id, limit=10):
+    """
+    Returns the number of consecutive messages sent by the bot in the given channel,
+    starting from the most recent message and stopping at the first non-bot message.
+    """
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT user_id, is_owner
+                    FROM message_history
+                    WHERE channel_id = %s
+                    ORDER BY timestamp DESC
+                    LIMIT %s
+                    """,
+                    (channel_id, limit),
+                )
+                rows = cur.fetchall()
+                count = 0
+                for row in rows:
+                    # If the message is from the bot (is_owner True or user_id == bot_user_id)
+                    if row["is_owner"] or str(row["user_id"]) == str(bot_user_id):
+                        count += 1
+                    else:
+                        break  # Stop counting at the first non-bot message
+                return count
+    except Exception as e:
+        print(f"[DB ERROR] count_consecutive_bot_replies failed: {e}")
+        return 0

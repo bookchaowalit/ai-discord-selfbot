@@ -11,6 +11,7 @@ from collections import deque
 from datetime import datetime, timezone
 
 import discord
+import emoji
 import pytz
 import requests
 from colorama import Fore, Style, init
@@ -20,19 +21,33 @@ from dotenv import load_dotenv
 from utils.ai import generate_response, generate_response_image, init_ai
 from utils.ai_agents import (
     analyze_history_agent,
+    channel_vocab_agent,
     consistency_agent,
     contextual_response_agent,
     ensure_english_agent,
     filter_agent,
     final_compact_agent,
     language_is_english_agent,
+    nosy_reply_filter_agent,
     personalization_agent,
+    question_validity_agent,
+    relevance_agent,
     reply_to_reply_agent,
     reply_validity_agent,
+    simplify_agent,
+    slang_filter_agent,
+    time_question_agent,
     tone_context_agent,
+    topic_filter_agent,
 )
 from utils.api_server import app, broadcast_log
-from utils.db import add_message_history, get_channels, get_ignored_users, init_db
+from utils.db import (
+    add_message_history,
+    count_consecutive_bot_replies,
+    get_channels,
+    get_ignored_users,
+    init_db,
+)
 from utils.error_notifications import webhook_log
 from utils.helpers import (
     clear_console,
@@ -253,27 +268,67 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         combined_prompt = prompt
         last_user_message = prompt
 
-    # --- 1. Analyze history and summarize context ---
+    # --- Time Question Agent ---
+    time_answer = await time_question_agent(last_user_message, history, message)
+    if time_answer not in ["no", "exact"]:
+        await log(f"[TIME AGENT] {time_answer}")
+        print(f"[AI-Selfbot] [TIME AGENT] {time_answer}")
+        await message.reply(time_answer)
+        return
+    elif time_answer == "exact":
+        thai_time = get_thai_time_phrase()
+        await log(f"[TIME AGENT] {thai_time}")
+        print(f"[AI-Selfbot] [TIME AGENT] {thai_time}")
+        await message.reply(thai_time)
+        return
+
+    # --- Topic filter ---
+    is_simple = await topic_filter_agent(last_user_message, history, message)
+    if not is_simple:
+        await log("[TOPIC FILTER AGENT] Skipping: not a simple/casual question.")
+        print(
+            "[AI-Selfbot] [TOPIC FILTER AGENT] Skipping: not a simple/casual question."
+        )
+        return
+
+    # --- Relevance filter ---
+    is_relevant = await relevance_agent(last_user_message, history, message)
+    if not is_relevant:
+        await log(
+            "[RELEVANCE AGENT] Skipping: message not relevant or too hard/abnormal."
+        )
+        print(
+            "[AI-Selfbot] [RELEVANCE AGENT] Skipping: message not relevant or too hard/abnormal."
+        )
+        return
+
+    # --- 1. Analyze history and summarize context (optional, for logging or future use) ---
     summary = await analyze_history_agent(last_user_message, history)
     print(f"[AI-Selfbot] [HISTORY SUMMARY] {summary}")
     await log(f"[HISTORY SUMMARY] {summary}")
 
-    # --- 2. Generate a context-aware reply using the summary ---
-    response = await contextual_response_agent(summary, last_user_message, history)
-    await log(f"[CONTEXTUAL RESPONSE] {response}")
-    print(f"[AI-Selfbot] [CONTEXTUAL RESPONSE] {response}")
-
-    # --- Consistency Agent ---
-    consistency_result = await consistency_agent(summary, last_user_message, response)
-    await log(f"[CONSISTENCY AGENT] {consistency_result}")
-    if consistency_result != "OK":
-        response = consistency_result  # Use the suggested better reply
-        await log(f"[CONSISTENCY AGENT] Using improved reply: {response}")
-
-    # --- Personalization Agent ---
-    response = await personalization_agent(response, message)
+    special_words = await channel_vocab_agent(history, message)
+    # --- 2. Generate a personalized, context-aware reply ---
+    response = await personalization_agent(
+        last_user_message, message, history, special_words=special_words
+    )
     await log(f"[PERSONALIZED RESPONSE] {response}")
     print(f"[AI-Selfbot] [PERSONALIZED RESPONSE] {response}")
+
+    # --- Question Validity Agent ---
+    response = await question_validity_agent(response, message)
+    await log(f"[QUESTION VALIDITY AGENT] {response}")
+    print(f"[AI-Selfbot] [QUESTION VALIDITY AGENT] {response}")
+
+    # --- Simplify Agent ---
+    response = await simplify_agent(response, message)
+    await log(f"[SIMPLIFY AGENT] {response}")
+    print(f"[AI-Selfbot] [SIMPLIFY AGENT] {response}")
+
+    # --- Slang/Thai Filter Agent ---
+    response = await slang_filter_agent(response, message)
+    await log(f"[SLANG FILTER AGENT] {response}")
+    print(f"[AI-Selfbot] [SLANG FILTER AGENT] {response}")
 
     # --- Reply Validity Agent ---
     is_valid = await reply_validity_agent(response, message)
@@ -356,6 +411,8 @@ async def on_message(message):
     if should_ignore_message(message) and not message.author.id == bot.owner_id:
         return
 
+    if is_sticker_or_emoji_only(message):
+        return
     # --- Store message history in DB (only for active_channels) ---
     if message.channel.id in bot.active_channels:
         if message.reference and getattr(message.reference, "resolved", None):
@@ -427,27 +484,46 @@ async def on_message(message):
 
 async def process_message_queue(channel_id):
     def get_reply_priority(message):
+        # 0: Direct reply to the bot
+        # 1: Reply to a message that replied to the bot
+        # 2: Reply to another user
+        # 3: Not a reply
         if message.reference and message.reference.resolved:
             replied_to = message.reference.resolved
             replied_to_author = getattr(replied_to, "author", None)
-            if replied_to_author and replied_to_author.id == bot.selfbot_id:
-                return 0
-            else:
-                return 2
-        else:
-            return 1
+            if replied_to_author:
+                if replied_to_author.id == bot.selfbot_id:
+                    return 0  # Direct reply to the bot
+                # Check if the replied message was itself a reply to the bot
+                if replied_to.reference and replied_to.reference.resolved:
+                    prev_replied_to = replied_to.reference.resolved
+                    prev_replied_to_author = getattr(prev_replied_to, "author", None)
+                    if (
+                        prev_replied_to_author
+                        and prev_replied_to_author.id == bot.selfbot_id
+                    ):
+                        return 1  # Reply to a message that replied to the bot
+                return 2  # Reply to another user
+        return 3  # Not a reply
 
     async with bot.processing_locks[channel_id]:
         while bot.message_queues[channel_id]:
+            # Sort messages by priority
             sorted_msgs = sorted(
                 list(bot.message_queues[channel_id]), key=get_reply_priority
             )
             bot.message_queues[channel_id] = deque(sorted_msgs)
 
             message = bot.message_queues[channel_id].popleft()
+
+            # Ignore sticker or emoji-only messages
+            if is_sticker_or_emoji_only(message):
+                continue
+
             batch_key = f"{message.author.id}-{channel_id}"
             current_time = time.time()
 
+            # --- Batching logic ---
             if bot.batch_messages:
                 if batch_key not in bot.user_message_batches:
                     first_image_url = (
@@ -507,6 +583,7 @@ async def process_message_queue(channel_id):
                 message_to_reply_to = message
                 image_url = message.attachments[0].url if message.attachments else None
 
+            # Replace mentions with display names
             for mention in message_to_reply_to.mentions:
                 combined_content = combined_content.replace(
                     f"<@{mention.id}>", f"@{mention.display_name}"
@@ -522,16 +599,39 @@ async def process_message_queue(channel_id):
                 )
             history = bot.message_history[key]
 
-            consecutive_bot_replies = 0
-            for entry in reversed(history):
-                if entry["role"] == "assistant":
-                    consecutive_bot_replies += 1
-                elif entry["role"] == "user":
-                    break
+            # --- Nosy reply filter: skip if replying to another user and not appropriate ---
+            if (
+                message_to_reply_to.reference
+                and message_to_reply_to.reference.resolved
+                and getattr(message_to_reply_to.reference.resolved, "author", None)
+                and message_to_reply_to.reference.resolved.author.id != bot.selfbot_id
+                and message_to_reply_to.channel.id
+                in bot.active_channels  # Only check in active_channels
+            ):
+                replied_message = getattr(
+                    message_to_reply_to.reference.resolved, "content", ""
+                )
+                should_reply = await nosy_reply_filter_agent(
+                    message_to_reply_to.content,
+                    replied_message,
+                    history,
+                    message_to_reply_to,
+                )
+                if not should_reply:
+                    print(
+                        "[AI-Selfbot] [NOSY FILTER] Skipping nosy or inappropriate reply."
+                    )
+                    continue
 
+            # --- DB check for consecutive bot replies ---
+            consecutive_bot_replies = count_consecutive_bot_replies(
+                channel_id=message_to_reply_to.channel.id,
+                bot_user_id=bot.owner_id,
+                limit=3,
+            )
             if consecutive_bot_replies >= 2:
                 print(
-                    f"[AI-Selfbot] [WAIT] Already replied {consecutive_bot_replies} times in a row in channel {channel_id}. Waiting for someone else to chat."
+                    f"[AI-Selfbot] [WAIT] Already replied {consecutive_bot_replies} times in a row in channel {channel_id} (DB check). Waiting for someone else to chat."
                 )
                 return
 
@@ -607,6 +707,25 @@ def patched_get_build_number(session):
             return 9999
 
     return inner
+
+
+def is_sticker_or_emoji_only(message):
+    # Check for Discord stickers
+    if getattr(message, "stickers", None) and len(message.stickers) > 0:
+        return True
+    # Check for only emojis (unicode or custom)
+    content = message.content.strip()
+    if not content:
+        return False
+    # Remove all whitespace
+    content = "".join(content.split())
+    # If all characters are emojis (unicode or Discord custom)
+    if all(
+        emoji.is_emoji(char) or char in [":", "<", ">", "a", ":", "_", "-"]
+        for char in content
+    ):
+        return True
+    return False
 
 
 # Patch the function at runtime

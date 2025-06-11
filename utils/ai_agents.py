@@ -1,16 +1,24 @@
 from utils.ai import generate_response
 from utils.prompts import (
     analyze_history_prompt,
+    channel_vocab_agent_prompt,
     consistency_agent_prompt,
     contextual_response_prompt,
     ensure_english_agent_prompt,
     filter_agent_prompt,
     final_compact_agent_prompt,
     language_is_english_agent_prompt,
+    nosy_reply_filter_agent_prompt,
     personalization_agent_prompt,
+    question_validity_agent_prompt,
+    relevance_agent_prompt,
     reply_to_reply_agent_prompt,
     reply_validity_agent_prompt,
+    simplify_agent_prompt,
+    slang_filter_agent_prompt,
+    time_question_agent_prompt,
     tone_context_agent_prompt,
+    topic_filter_agent_prompt,
 )
 
 # Import agent_settings and broadcast_log from your FastAPI server
@@ -124,30 +132,26 @@ async def reply_validity_agent(reply, message=None, history=None):
     return result.strip().lower().startswith("yes")
 
 
-async def personalization_agent(reply, message=None, history=None):
-    if not agent_settings.get("personalization_agent", {}).get("enabled", True):
-        return reply
-    is_english = await language_is_english_agent(reply, message=message)
-    if not is_english:
-        log_msg = "[PERSONALIZATION AGENT] Skipping personalization (not English)."
-        print(f"[AI-Selfbot] {log_msg}")
-        await broadcast_log(log_msg, **get_log_context(message))
-        return reply
-
+async def personalization_agent(
+    user_message, message=None, history=None, special_words=None
+):
     context_snippet = ""
     if history:
-        recent = history[-5:]
+        recent = history[-6:]
         context_snippet = "\n".join(
             f"{h.get('role','user')}: {h.get('content','')}" for h in recent
         )
-    full_prompt = (
-        f"{personalization_agent_prompt}\nRecent context:\n{context_snippet}\n"
-        f'Original reply: "{reply}"\nPersonalized reply:'
+    special_words_str = ""
+    if special_words and special_words.lower() != "none":
+        special_words_str = f"Special words/slang for this channel: {special_words}\n"
+    prompt = (
+        f"{personalization_agent_prompt}\n"
+        f"{special_words_str}"
+        f"Recent conversation:\n{context_snippet}\n"
+        f'User message: "{user_message}"\n'
+        f"Your reply:"
     )
-    result = await generate_response(full_prompt, "", history=None)
-    log_msg = f"[PERSONALIZATION AGENT] {result.strip()}"
-    print(f"[AI-Selfbot] {log_msg}")
-    await broadcast_log(log_msg, **get_log_context(message))
+    result = await generate_response(prompt, "", history=None)
     return result.strip()
 
 
@@ -241,3 +245,118 @@ async def final_compact_agent(reply):
     prompt = f"{final_compact_agent_prompt}\n" f'Reply: "{reply}"\n' f"Shortened reply:"
     result = await generate_response(prompt, "", history=None)
     return result.strip()
+
+
+async def topic_filter_agent(user_message, history=None, message=None):
+    context_snippet = ""
+    if history:
+        recent = history[-5:]
+        context_snippet = "\n".join(
+            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
+        )
+    prompt = (
+        f"{topic_filter_agent_prompt}\n"
+        f"Recent context:\n{context_snippet}\n"
+        f'User message: "{user_message}"'
+    )
+    result = await generate_response(prompt, "", history=None)
+    log_msg = f"[TOPIC FILTER AGENT] {result.strip()}"
+    print(f"[AI-Selfbot] {log_msg}")
+    await broadcast_log(log_msg, **get_log_context(message))
+    return result.strip().lower().startswith("yes")
+
+
+async def relevance_agent(user_message, history=None, message=None):
+    context_snippet = ""
+    if history:
+        recent = history[-5:]
+        context_snippet = "\n".join(
+            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
+        )
+    prompt = (
+        f"{relevance_agent_prompt}\n"
+        f"Recent context:\n{context_snippet}\n"
+        f'User message: "{user_message}"'
+    )
+    result = await generate_response(prompt, "", history=None)
+    log_msg = f"[RELEVANCE AGENT] {result.strip()}"
+    print(f"[AI-Selfbot] {log_msg}")
+    await broadcast_log(log_msg, **get_log_context(message))
+    return result.strip().lower().startswith("yes")
+
+
+async def channel_vocab_agent(history=None, message=None):
+    context_snippet = ""
+    if history:
+        recent = history[-10:]  # Use more history for better detection
+        context_snippet = "\n".join(
+            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
+        )
+    prompt = (
+        f"{channel_vocab_agent_prompt}\n"
+        f"Recent conversation:\n{context_snippet}\n"
+        f"Special words or slang:"
+    )
+    result = await generate_response(prompt, "", history=None)
+    log_msg = f"[CHANNEL VOCAB AGENT] {result.strip()}"
+    print(f"[AI-Selfbot] {log_msg}")
+    await broadcast_log(log_msg, **get_log_context(message))
+    return result.strip()
+
+
+async def simplify_agent(reply, message=None):
+    prompt = (
+        f"{simplify_agent_prompt}\n" f'Original reply: "{reply}"\n' f"Simplified reply:"
+    )
+    result = await generate_response(prompt, "", history=None)
+    return result.strip()
+
+
+async def slang_filter_agent(reply, message=None):
+    prompt = (
+        f"{slang_filter_agent_prompt}\n"
+        f'Original reply: "{reply}"\n'
+        f"Filtered reply:"
+    )
+    result = await generate_response(prompt, "", history=None)
+    return result.strip()
+
+
+async def question_validity_agent(reply, message=None):
+    prompt = (
+        f"{question_validity_agent_prompt}\n"
+        f'Bot\'s reply: "{reply}"\n'
+        f"Checked reply:"
+    )
+    result = await generate_response(prompt, "", history=None)
+    return result.strip()
+
+
+async def nosy_reply_filter_agent(
+    user_message, replied_message, history=None, message=None
+):
+    context_snippet = ""
+    if history:
+        recent = history[-5:]
+        context_snippet = "\n".join(
+            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
+        )
+    prompt = (
+        f"{nosy_reply_filter_agent_prompt}\n"
+        f"Recent context:\n{context_snippet}\n"
+        f'Original message: "{replied_message}"\n'
+        f'User\'s reply: "{user_message}"\n'
+        f"Should the bot reply? (yes/no):"
+    )
+    result = await generate_response(prompt, "", history=None)
+    return result.strip().lower().startswith("yes")
+
+
+async def time_question_agent(user_message, history=None, message=None):
+    prompt = (
+        f"{time_question_agent_prompt}\n"
+        f'User message: "{user_message}"\n'
+        f"Your answer:"
+    )
+    result = await generate_response(prompt, "", history=None)
+    return result.strip().lower()
