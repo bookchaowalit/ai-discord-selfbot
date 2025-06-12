@@ -28,6 +28,7 @@ from utils.ai_agents import (
     filter_agent,
     final_compact_agent,
     language_is_english_agent,
+    no_ask_back_agent,
     nosy_reply_filter_agent,
     personalization_agent,
     question_validity_agent,
@@ -66,6 +67,26 @@ SPAM_TIME_WINDOW = 10.0
 COOLDOWN_DURATION = 60.0
 MAX_HISTORY = 15
 CONVERSATION_TIMEOUT = 150.0
+
+
+async def auto_greeting_task():
+    await bot.wait_until_ready()
+    greetings = ["Gfogo", "gm", "hey", "yo", "morning", "hello", "hi hi", "fogo"]
+    while not bot.is_closed():
+        if bot.active_channels:
+            channel_id = random.choice(list(bot.active_channels))
+            channel = bot.get_channel(channel_id)
+            if channel:
+                greeting = random.choice(greetings)
+                try:
+                    await channel.send(greeting)
+                    print(
+                        f"[AI-Selfbot] [AUTO-GREETING] Sent '{greeting}' to #{getattr(channel, 'name', channel_id)}"
+                    )
+                except Exception as e:
+                    print(f"[AI-Selfbot] [AUTO-GREETING ERROR] {e}")
+        # Wait a random interval (e.g., 1 to 3 hours)
+        await asyncio.sleep(random.randint(3600, 10800))
 
 
 def build_context_window(history, user_name):
@@ -193,6 +214,8 @@ async def on_ready():
             except Exception:
                 pass
     print_separator()
+    # Start auto-greeting task
+    bot.loop.create_task(auto_greeting_task())
 
 
 @bot.event
@@ -239,6 +262,25 @@ def get_thai_time_phrase():
         return f"{hour:02d}:{minute:02d} (Thailand time)"
 
 
+def is_sticker_or_emoji_only(message):
+    # Check for Discord stickers
+    if getattr(message, "stickers", None) and len(message.stickers) > 0:
+        return True
+    # Check for only emojis (unicode or custom)
+    content = message.content.strip()
+    if not content:
+        return False
+    # Remove all whitespace
+    content = "".join(content.split())
+    # If all characters are emojis (unicode or Discord custom)
+    if all(
+        emoji.is_emoji(char) or char in [":", "<", ">", "a", ":", "_", "-"]
+        for char in content
+    ):
+        return True
+    return False
+
+
 async def generate_response_and_reply(message, prompt, history, image_url=None):
     user_name = message.author.name
     channel_id = message.channel.id
@@ -267,20 +309,6 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     else:
         combined_prompt = prompt
         last_user_message = prompt
-
-    # --- Time Question Agent ---
-    time_answer = await time_question_agent(last_user_message, history, message)
-    if time_answer not in ["no", "exact"]:
-        await log(f"[TIME AGENT] {time_answer}")
-        print(f"[AI-Selfbot] [TIME AGENT] {time_answer}")
-        await message.reply(time_answer)
-        return
-    elif time_answer == "exact":
-        thai_time = get_thai_time_phrase()
-        await log(f"[TIME AGENT] {thai_time}")
-        print(f"[AI-Selfbot] [TIME AGENT] {thai_time}")
-        await message.reply(thai_time)
-        return
 
     # --- Topic filter ---
     is_simple = await topic_filter_agent(last_user_message, history, message)
@@ -314,6 +342,11 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     )
     await log(f"[PERSONALIZED RESPONSE] {response}")
     print(f"[AI-Selfbot] [PERSONALIZED RESPONSE] {response}")
+
+    # --- No Ask Back Agent ---
+    response = await no_ask_back_agent(response, message)
+    await log(f"[NO ASK BACK AGENT] {response}")
+    print(f"[AI-Selfbot] [NO ASK BACK AGENT] {response}")
 
     # --- Question Validity Agent ---
     response = await question_validity_agent(response, message)
@@ -349,6 +382,18 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     await log(f"[FINAL COMPACT AGENT] {response}")
     print(f"[AI-Selfbot] [FINAL COMPACT AGENT] {response}")
 
+    # --- Time Question Agent (at the end for naturalness) ---
+    time_answer = await time_question_agent(last_user_message, history, message)
+    if time_answer not in ["no", "exact"]:
+        await log(f"[TIME AGENT] {time_answer}")
+        print(f"[AI-Selfbot] [TIME AGENT] {time_answer}")
+        response = time_answer
+    elif time_answer == "exact":
+        thai_time = get_thai_time_phrase()
+        await log(f"[TIME AGENT] {thai_time}")
+        print(f"[AI-Selfbot] [TIME AGENT] {thai_time}")
+        response = thai_time
+
     chunks = split_response(response)
     sent = False
 
@@ -371,11 +416,11 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         )
         return
 
-    await log(f"[TYPING DELAY] Waiting {base_delay:.2f}s before replying...")
-    print(f"[AI-Selfbot] [TYPING DELAY] Waiting {base_delay:.2f}s before replying...")
-    await asyncio.sleep(base_delay)
+    await log(f"[TYPING DELAY] Typing for {base_delay:.2f}s...")
+    print(f"[AI-Selfbot] [TYPING DELAY] Typing for {base_delay:.2f}s...")
 
     async with message.channel.typing():
+        await asyncio.sleep(base_delay)
         for chunk in chunks:
             if chunk.strip() == "":
                 continue
@@ -385,19 +430,19 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
             await message.reply(chunk)
             sent = True
 
-            # --- Store AI response in DB if in active_channels ---
-            if message.channel.id in bot.active_channels:
-                add_message_history(
-                    channel_id=message.channel.id,
-                    channel_name=getattr(message.channel, "name", None),
-                    user_id=bot.owner_id,
-                    user_name=str(bot.user) if hasattr(bot, "user") else "selfbot",
-                    message=chunk,
-                    replied_user=message.author.id,
-                    tagged_me=False,
-                    is_owner=True,
-                    timestamp=datetime.now(timezone.utc),
-                )
+        # --- Store AI response in DB if in active_channels ---
+        if sent and message.channel.id in bot.active_channels:
+            add_message_history(
+                channel_id=message.channel.id,
+                channel_name=getattr(message.channel, "name", None),
+                user_id=bot.owner_id,
+                user_name=str(bot.user) if hasattr(bot, "user") else "selfbot",
+                message=response,  # Save the full response, not just the chunk
+                replied_user=message.author.id,
+                tagged_me=False,
+                is_owner=True,
+                timestamp=datetime.now(timezone.utc),
+            )
 
     if response and isinstance(response, str) and response.strip() != "":
         key = f"{message.author.id}-{message.channel.id}"
@@ -408,7 +453,7 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
 
 @bot.event
 async def on_message(message):
-    if should_ignore_message(message) and not message.author.id == bot.owner_id:
+    if should_ignore_message(message):
         return
 
     if is_sticker_or_emoji_only(message):
@@ -663,6 +708,7 @@ async def process_message_queue(channel_id):
                         {"role": "assistant", "content": response}
                     )
                     bot.last_reply_time[channel_id] = time.time()
+                return  # Stop after one reply per queue cycle
 
 
 async def load_extensions():
@@ -709,26 +755,6 @@ def patched_get_build_number(session):
     return inner
 
 
-def is_sticker_or_emoji_only(message):
-    # Check for Discord stickers
-    if getattr(message, "stickers", None) and len(message.stickers) > 0:
-        return True
-    # Check for only emojis (unicode or custom)
-    content = message.content.strip()
-    if not content:
-        return False
-    # Remove all whitespace
-    content = "".join(content.split())
-    # If all characters are emojis (unicode or Discord custom)
-    if all(
-        emoji.is_emoji(char) or char in [":", "<", ">", "a", ":", "_", "-"]
-        for char in content
-    ):
-        return True
-    return False
-
-
-# Patch the function at runtime
 import discord.utils
 
 discord.utils._get_build_number = patched_get_build_number(None)
