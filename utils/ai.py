@@ -1,12 +1,13 @@
 import sys
+from os import getenv
+from sys import exit
 
+from dotenv import load_dotenv
 from groq import AsyncGroq
 from openai import AsyncOpenAI as OpenAI
-from os import getenv
-from dotenv import load_dotenv
-from sys import exit
+
+from utils.error_notifications import print_error, webhook_log
 from utils.helpers import get_env_path, load_config
-from utils.error_notifications import webhook_log, print_error
 
 client = None
 model = None

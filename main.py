@@ -71,7 +71,7 @@ CONVERSATION_TIMEOUT = 150.0
 
 async def auto_greeting_task():
     await bot.wait_until_ready()
-    greetings = ["Gfogo", "gm", "hey", "yo", "morning", "hello", "hi hi", "fogo"]
+    greetings = ["Gfogo"]
     while not bot.is_closed():
         if bot.active_channels:
             channel_id = random.choice(list(bot.active_channels))
@@ -530,26 +530,15 @@ async def on_message(message):
 async def process_message_queue(channel_id):
     def get_reply_priority(message):
         # 0: Direct reply to the bot
-        # 1: Reply to a message that replied to the bot
+        # 1: Not a reply (top-level message)
         # 2: Reply to another user
-        # 3: Not a reply
         if message.reference and message.reference.resolved:
             replied_to = message.reference.resolved
             replied_to_author = getattr(replied_to, "author", None)
-            if replied_to_author:
-                if replied_to_author.id == bot.selfbot_id:
-                    return 0  # Direct reply to the bot
-                # Check if the replied message was itself a reply to the bot
-                if replied_to.reference and replied_to.reference.resolved:
-                    prev_replied_to = replied_to.reference.resolved
-                    prev_replied_to_author = getattr(prev_replied_to, "author", None)
-                    if (
-                        prev_replied_to_author
-                        and prev_replied_to_author.id == bot.selfbot_id
-                    ):
-                        return 1  # Reply to a message that replied to the bot
-                return 2  # Reply to another user
-        return 3  # Not a reply
+            if replied_to_author and replied_to_author.id == bot.selfbot_id:
+                return 0  # Direct reply to the bot
+            return 2  # Reply to another user
+        return 1  # Not a reply
 
     async with bot.processing_locks[channel_id]:
         while bot.message_queues[channel_id]:
@@ -564,6 +553,15 @@ async def process_message_queue(channel_id):
             # Ignore sticker or emoji-only messages
             if is_sticker_or_emoji_only(message):
                 continue
+
+            # Only reply if:
+            # 1. Not a reply (top-level message)
+            # 2. Reply to the bot
+            if message.reference and message.reference.resolved:
+                replied_to = message.reference.resolved
+                replied_to_author = getattr(replied_to, "author", None)
+                if not replied_to_author or replied_to_author.id != bot.selfbot_id:
+                    continue  # Skip replies to other users
 
             batch_key = f"{message.author.id}-{channel_id}"
             current_time = time.time()
@@ -643,30 +641,6 @@ async def process_message_queue(channel_id):
                     {"role": "user", "content": combined_content}
                 )
             history = bot.message_history[key]
-
-            # --- Nosy reply filter: skip if replying to another user and not appropriate ---
-            if (
-                message_to_reply_to.reference
-                and message_to_reply_to.reference.resolved
-                and getattr(message_to_reply_to.reference.resolved, "author", None)
-                and message_to_reply_to.reference.resolved.author.id != bot.selfbot_id
-                and message_to_reply_to.channel.id
-                in bot.active_channels  # Only check in active_channels
-            ):
-                replied_message = getattr(
-                    message_to_reply_to.reference.resolved, "content", ""
-                )
-                should_reply = await nosy_reply_filter_agent(
-                    message_to_reply_to.content,
-                    replied_message,
-                    history,
-                    message_to_reply_to,
-                )
-                if not should_reply:
-                    print(
-                        "[AI-Selfbot] [NOSY FILTER] Skipping nosy or inappropriate reply."
-                    )
-                    continue
 
             # --- DB check for consecutive bot replies ---
             consecutive_bot_replies = count_consecutive_bot_replies(
