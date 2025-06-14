@@ -234,3 +234,28 @@ def count_consecutive_bot_replies(channel_id, bot_user_id, limit=10):
     except Exception as e:
         print(f"[DB ERROR] count_consecutive_bot_replies failed: {e}")
         return 0
+
+
+def count_bot_replies_today(bot_user_id):
+    """
+    Returns the number of messages sent by the bot (is_owner True or user_id == bot_user_id)
+    for today (UTC).
+    """
+    try:
+        today = datetime.datetime.utcnow().date()
+        tomorrow = today + datetime.timedelta(days=1)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM message_history
+                    WHERE (is_owner = TRUE OR user_id = %s)
+                    AND timestamp >= %s AND timestamp < %s
+                    """,
+                    (bot_user_id, today, tomorrow),
+                )
+                row = cur.fetchone()
+                return row["count"] if row else 0
+    except Exception as e:
+        print(f"[DB ERROR] count_bot_replies_today failed: {e}")
+        return 0

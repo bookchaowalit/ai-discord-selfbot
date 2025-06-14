@@ -46,7 +46,7 @@ bot:
   # Whether the bot should ping on replies
   reply_ping: true
 
-  active_channels: [1330374920236171264]  # Replace with your channel IDs
+  active_channels: [1377995088088535204]  # Replace with your channel IDs
 
 notifications:
   error_webhook: ""

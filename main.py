@@ -27,6 +27,7 @@ from utils.ai_agents import (
     ensure_english_agent,
     filter_agent,
     final_compact_agent,
+    hobby_favorite_agent,
     language_is_english_agent,
     no_ask_back_agent,
     nosy_reply_filter_agent,
@@ -44,6 +45,7 @@ from utils.ai_agents import (
 from utils.api_server import app, broadcast_log
 from utils.db import (
     add_message_history,
+    count_bot_replies_today,
     count_consecutive_bot_replies,
     get_channels,
     get_ignored_users,
@@ -87,6 +89,24 @@ async def auto_greeting_task():
                     print(f"[AI-Selfbot] [AUTO-GREETING ERROR] {e}")
         # Wait a random interval (e.g., 1 to 3 hours)
         await asyncio.sleep(random.randint(3600, 10800))
+
+
+def is_gif_message(message):
+    # Check attachments
+    if any(
+        a.filename.lower().endswith(".gif") for a in getattr(message, "attachments", [])
+    ):
+        return True
+    # Check embeds (for GIF links)
+    if any(
+        (getattr(e, "url", "") or "").lower().endswith(".gif")
+        for e in getattr(message, "embeds", [])
+    ):
+        return True
+    # Check for common GIF providers in content
+    if "tenor.com/view/" in message.content or "giphy.com/media/" in message.content:
+        return True
+    return False
 
 
 def build_context_window(history, user_name):
@@ -310,6 +330,11 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         combined_prompt = prompt
         last_user_message = prompt
 
+    if count_bot_replies_today(bot.owner_id) >= 300:
+        print("[AI-Selfbot] Daily reply limit reached (300). Stopping bot.")
+        await bot.close()
+        return
+
     # --- Topic filter ---
     is_simple = await topic_filter_agent(last_user_message, history, message)
     if not is_simple:
@@ -344,9 +369,9 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     print(f"[AI-Selfbot] [PERSONALIZED RESPONSE] {response}")
 
     # --- No Ask Back Agent ---
-    response = await no_ask_back_agent(response, message)
-    await log(f"[NO ASK BACK AGENT] {response}")
-    print(f"[AI-Selfbot] [NO ASK BACK AGENT] {response}")
+    # response = await no_ask_back_agent(response, message)
+    # await log(f"[NO ASK BACK AGENT] {response}")
+    # print(f"[AI-Selfbot] [NO ASK BACK AGENT] {response}")
 
     # --- Question Validity Agent ---
     response = await question_validity_agent(response, message)
@@ -357,6 +382,10 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     response = await simplify_agent(response, message)
     await log(f"[SIMPLIFY AGENT] {response}")
     print(f"[AI-Selfbot] [SIMPLIFY AGENT] {response}")
+
+    response = await hobby_favorite_agent(last_user_message, response)
+    await log(f"[HOBBY/FAVORITE AGENT] {response}")
+    print(f"[AI-Selfbot] [HOBBY/FAVORITE AGENT] {response}")
 
     # --- Slang/Thai Filter Agent ---
     response = await slang_filter_agent(response, message)
@@ -457,6 +486,9 @@ async def on_message(message):
         return
 
     if is_sticker_or_emoji_only(message):
+        return
+
+    if is_gif_message(message):
         return
     # --- Store message history in DB (only for active_channels) ---
     if message.channel.id in bot.active_channels:

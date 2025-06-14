@@ -7,6 +7,7 @@ from utils.prompts import (
     ensure_english_agent_prompt,
     filter_agent_prompt,
     final_compact_agent_prompt,
+    hobby_favorite_agent_prompt,
     language_is_english_agent_prompt,
     no_ask_back_agent_prompt,
     nosy_reply_filter_agent_prompt,
@@ -366,6 +367,17 @@ async def time_question_agent(user_message, history=None, message=None):
 async def no_ask_back_agent(reply, message=None):
     prompt = (
         f"{no_ask_back_agent_prompt}\n" f'Bot\'s reply: "{reply}"\n' f"Rewritten reply:"
+    )
+    result = await generate_response(prompt, "", history=None)
+    return result.strip()
+
+
+async def hobby_favorite_agent(user_message, reply):
+    prompt = (
+        f"{hobby_favorite_agent_prompt}\n"
+        f'User message: "{user_message}"\n'
+        f'Bot\'s reply: "{reply}"\n'
+        f"Your answer:"
     )
     result = await generate_response(prompt, "", history=None)
     return result.strip()
