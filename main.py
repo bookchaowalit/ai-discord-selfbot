@@ -374,24 +374,15 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     # await log(f"[NO ASK BACK AGENT] {response}")
     # print(f"[AI-Selfbot] [NO ASK BACK AGENT] {response}")
 
-    # --- Question Validity Agent ---
-    response = await question_validity_agent(response, message)
-    await log(f"[QUESTION VALIDITY AGENT] {response}")
-    print(f"[AI-Selfbot] [QUESTION VALIDITY AGENT] {response}")
+    # # --- Question Validity Agent ---
+    # response = await question_validity_agent(response, message)
+    # await log(f"[QUESTION VALIDITY AGENT] {response}")
+    # print(f"[AI-Selfbot] [QUESTION VALIDITY AGENT] {response}")
 
     # --- Simplify Agent ---
-    response = await simplify_agent(response, message)
-    await log(f"[SIMPLIFY AGENT] {response}")
-    print(f"[AI-Selfbot] [SIMPLIFY AGENT] {response}")
-
-    response = await hobby_favorite_agent(last_user_message, response)
-    await log(f"[HOBBY/FAVORITE AGENT] {response}")
-    print(f"[AI-Selfbot] [HOBBY/FAVORITE AGENT] {response}")
-
-    # --- Slang/Thai Filter Agent ---
-    response = await slang_filter_agent(response, message)
-    await log(f"[SLANG FILTER AGENT] {response}")
-    print(f"[AI-Selfbot] [SLANG FILTER AGENT] {response}")
+    # response = await simplify_agent(response, message)
+    # await log(f"[SIMPLIFY AGENT] {response}")
+    # print(f"[AI-Selfbot] [SIMPLIFY AGENT] {response}")
 
     # --- Reply Validity Agent ---
     is_valid = await reply_validity_agent(response, message)

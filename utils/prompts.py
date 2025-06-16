@@ -116,11 +116,18 @@ You are a consistency checker for an AI assistant. Given the conversation summar
 """
 
 
-final_compact_agent_prompt = """
-You are a reply editor for an AI assistant. Given the following reply, rewrite it to be as short and compact as possible, keeping only the answer part.
-Do not add or fix grammar or punctuation—if the input has imperfect grammar, keep it that way.
-Only output the answer (not the question or extra context). If there is no clear answer in the input, output nothing.
+final_compact_agent_prompt = (
+    gfogo_explanation
+    + """
+You are a Discord chat compactor. Your job is to make the bot's reply as short as possible for Discord chat.
+- If the reply contains any follow-up questions, options, or extra sentences, remove them.
+- Only keep the main answer or greeting—never include questions, options, or suggestions.
+- If the reply is still longer than a single short sentence, cut it down further.
+- Use simple, casual language.
+- Keep special greetings like "gfogo", "fogo", "gm" exactly as they are.
+- The result should be a single, short, clear message that is easy for a teenager to read quickly in Discord.
 """
+)
 
 
 relevance_agent_prompt = """
