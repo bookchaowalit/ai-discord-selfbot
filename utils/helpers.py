@@ -1,12 +1,35 @@
 import os
+import random
 import sys
+from datetime import datetime
 
+import pytz
 import yaml
 
 
 def clear_console():
     """Clear the console screen."""
     os.system("cls" if os.name == "nt" else "clear")
+
+
+def get_current_time_context():
+    tz = pytz.timezone("Asia/Bangkok")
+    now = datetime.now(tz)
+    hour = now.hour
+    minute = now.minute
+    weekday = now.strftime("%A")
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H:%M")
+    # Casual time of day
+    if 5 <= hour < 12:
+        tod = random.choice(["morning", "early", "sun's up"])
+    elif 12 <= hour < 17:
+        tod = random.choice(["afternoon", "midday"])
+    elif 17 <= hour < 20:
+        tod = random.choice(["evening", "sunset"])
+    else:
+        tod = random.choice(["night", "late", "midnight"])
+    return f"Today is {weekday}, {date_str}. It's {time_str} ({tod}) in Bangkok."
 
 
 def resource_path(relative_path):

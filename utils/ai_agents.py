@@ -1,4 +1,5 @@
 from utils.ai import generate_response
+from utils.helpers import get_current_time_context
 from utils.prompts import (
     analyze_history_prompt,
     channel_vocab_agent_prompt,
@@ -134,27 +135,30 @@ async def reply_validity_agent(reply, message=None, history=None):
     return result.strip().lower().startswith("yes")
 
 
-async def personalization_agent(
-    user_message, message=None, history=None, special_words=None
-):
-    context_snippet = ""
-    if history:
-        recent = history[-6:]
-        context_snippet = "\n".join(
-            f"{h.get('role','user')}: {h.get('content','')}" for h in recent
-        )
-    special_words_str = ""
-    if special_words and special_words.lower() != "none":
-        special_words_str = f"Special words/slang for this channel: {special_words}\n"
-    prompt = (
-        f"{personalization_agent_prompt}\n"
-        f"{special_words_str}"
-        f"Recent conversation:\n{context_snippet}\n"
-        f'User message: "{user_message}"\n'
-        f"Your reply:"
+async def personalization_agent(user_message, message, history, special_words=None):
+    current_time_context = get_current_time_context()
+    # Build the base prompt with current time context
+    prompt = personalization_agent_prompt.format(
+        current_time_context=current_time_context
     )
-    result = await generate_response(prompt, "", history=None)
-    return result.strip()
+
+    # Optionally add special words or channel slang if provided
+    if special_words:
+        prompt += f"\n\n[CHANNEL SLANG/KEYWORDS]: {', '.join(special_words)}"
+
+    # Optionally add recent conversation history for more context
+    if history:
+        formatted_history = "\n".join(
+            f"{h['role']}: {h['content']}" for h in history if h.get("content")
+        )
+        prompt += f"\n\n[RECENT CONVERSATION]:\n{formatted_history}"
+
+    # Add the user's latest message
+    prompt += f"\n\n[USER MESSAGE]: {user_message}"
+
+    # Generate the response
+    response = await generate_response(prompt, user_message, history)
+    return response.strip()
 
 
 async def language_is_english_agent(message_text, message=None, history=None):
