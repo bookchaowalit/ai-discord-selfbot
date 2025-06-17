@@ -2,6 +2,8 @@ bot:
   # Owner ID of your account (can't be same as bot's ID)
   owner_id: 1377995088088535204
 
+#rabbit 1377995088088535204
+#sam 1211484785956880435
   # Prefix you want bot commands to be triggered with
   prefix: "~"
 
