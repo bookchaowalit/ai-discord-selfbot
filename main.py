@@ -21,25 +21,19 @@ from dotenv import load_dotenv
 from utils.ai import generate_response, generate_response_image, init_ai
 from utils.ai_agents import (
     analyze_history_agent,
+    casual_grammar_agent,
     channel_vocab_agent,
-    consistency_agent,
-    contextual_response_agent,
+    compact_followup_agent,
     ensure_english_agent,
-    filter_agent,
     final_compact_agent,
-    hobby_favorite_agent,
-    language_is_english_agent,
-    no_ask_back_agent,
-    nosy_reply_filter_agent,
+    final_decision_agent,
+    final_truncation_agent,
+    followup_question_agent,
     personalization_agent,
-    question_validity_agent,
+    question_decision_agent,
     relevance_agent,
-    reply_to_reply_agent,
     reply_validity_agent,
-    simplify_agent,
-    slang_filter_agent,
     time_question_agent,
-    tone_context_agent,
     topic_filter_agent,
 )
 from utils.api_server import app, broadcast_log
@@ -361,31 +355,14 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     print(f"[AI-Selfbot] [HISTORY SUMMARY] {summary}")
     await log(f"[HISTORY SUMMARY] {summary}")
 
-    special_words = await channel_vocab_agent(history, message)
+    # special_words = await channel_vocab_agent(history, message)
     # --- 2. Generate a personalized, context-aware reply ---
-    response = await personalization_agent(
-        last_user_message, message, history, special_words=special_words
-    )
+    response = await personalization_agent(last_user_message, message, history)
     await log(f"[PERSONALIZED RESPONSE] {response}")
     print(f"[AI-Selfbot] [PERSONALIZED RESPONSE] {response}")
 
-    # --- No Ask Back Agent ---
-    # response = await no_ask_back_agent(response, message)
-    # await log(f"[NO ASK BACK AGENT] {response}")
-    # print(f"[AI-Selfbot] [NO ASK BACK AGENT] {response}")
-
-    # # --- Question Validity Agent ---
-    # response = await question_validity_agent(response, message)
-    # await log(f"[QUESTION VALIDITY AGENT] {response}")
-    # print(f"[AI-Selfbot] [QUESTION VALIDITY AGENT] {response}")
-
-    # --- Simplify Agent ---
-    # response = await simplify_agent(response, message)
-    # await log(f"[SIMPLIFY AGENT] {response}")
-    # print(f"[AI-Selfbot] [SIMPLIFY AGENT] {response}")
-
     # --- Reply Validity Agent ---
-    is_valid = await reply_validity_agent(response, message)
+    is_valid = await reply_validity_agent(response, message, history)
     await log(f"[REPLY VALIDITY] {is_valid}")
     if not is_valid:
         await log(f"[SKIP] Reply validity agent: reply is not valid/non-empty.")
@@ -394,14 +371,26 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         )
         return
 
-    # --- Ensure English Agent ---
-    response = await ensure_english_agent(response, message)
-    await log(f"[ENSURE ENGLISH AGENT] {response}")
-    print(f"[AI-Selfbot] [ENSURE ENGLISH AGENT] {response}")
-
-    response = await final_compact_agent(response)
+    response = await final_compact_agent(response, history)
     await log(f"[FINAL COMPACT AGENT] {response}")
     print(f"[AI-Selfbot] [FINAL COMPACT AGENT] {response}")
+
+    response = await followup_question_agent(response, history)
+    await log(f"[FOLLOW-UP QUESTION AGENT] {response}")
+    print(f"[AI-Selfbot] [FOLLOW-UP QUESTION AGENT] {response}")
+
+    # Compact the answer+question
+    response = await compact_followup_agent(response, history)
+    await log(f"[COMPACT FOLLOW-UP AGENT] {response}")
+    print(f"[AI-Selfbot] [COMPACT FOLLOW-UP AGENT] {response}")
+
+    response = await final_truncation_agent(response, history)
+    await log(f"[FINAL TRUNCATION AGENT] {response}")
+    print(f"[AI-Selfbot] [FINAL TRUNCATION AGENT] {response}")
+
+    response = await casual_grammar_agent(response, history)
+    await log(f"[CASUAL GRAMMAR AGENT] {response}")
+    print(f"[AI-Selfbot] [CASUAL GRAMMAR AGENT] {response}")
 
     # --- Time Question Agent (at the end for naturalness) ---
     time_answer = await time_question_agent(last_user_message, history, message)
@@ -679,8 +668,8 @@ async def process_message_queue(channel_id):
                 return
 
             now = time.time()
-            min_delay = 25
-            max_delay = 40
+            min_delay = 10
+            max_delay = 30
             delay = random.uniform(min_delay, max_delay)
             last_time = bot.last_reply_time.get(channel_id, 0)
             if now - last_time < delay:

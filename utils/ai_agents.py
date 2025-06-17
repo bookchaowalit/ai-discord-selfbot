@@ -2,17 +2,23 @@ from utils.ai import generate_response
 from utils.helpers import get_current_time_context
 from utils.prompts import (
     analyze_history_prompt,
+    casual_grammar_agent_prompt,
     channel_vocab_agent_prompt,
+    compact_followup_agent_prompt,
     consistency_agent_prompt,
     contextual_response_prompt,
     ensure_english_agent_prompt,
     filter_agent_prompt,
     final_compact_agent_prompt,
+    final_decision_agent_prompt,
+    final_truncation_agent_prompt,
+    followup_question_agent_prompt,
     hobby_favorite_agent_prompt,
     language_is_english_agent_prompt,
     no_ask_back_agent_prompt,
     nosy_reply_filter_agent_prompt,
     personalization_agent_prompt,
+    question_decision_agent_prompt,
     question_validity_agent_prompt,
     relevance_agent_prompt,
     reply_to_reply_agent_prompt,
@@ -44,6 +50,12 @@ except ImportError:
             "prompt": ensure_english_agent_prompt,
         },
     }
+
+
+def format_history(history):
+    return "\n".join(
+        f"{h['role']}: {h['content']}" for h in history if h.get("content")
+    )
 
 
 def get_log_context(message=None):
@@ -135,16 +147,12 @@ async def reply_validity_agent(reply, message=None, history=None):
     return result.strip().lower().startswith("yes")
 
 
-async def personalization_agent(user_message, message, history, special_words=None):
+async def personalization_agent(user_message, message, history):
     current_time_context = get_current_time_context()
     # Build the base prompt with current time context
     prompt = personalization_agent_prompt.format(
         current_time_context=current_time_context
     )
-
-    # Optionally add special words or channel slang if provided
-    if special_words:
-        prompt += f"\n\n[CHANNEL SLANG/KEYWORDS]: {', '.join(special_words)}"
 
     # Optionally add recent conversation history for more context
     if history:
@@ -247,9 +255,11 @@ async def consistency_agent(summary, user_message, bot_reply):
     return result.strip()
 
 
-async def final_compact_agent(reply):
-    prompt = f"{final_compact_agent_prompt}\n" f'Reply: "{reply}"\n' f"Shortened reply:"
-    result = await generate_response(prompt, "", history=None)
+async def final_compact_agent(reply, history):
+    prompt = final_compact_agent_prompt.format(
+        history=format_history(history), reply=reply
+    )
+    result = await generate_response(prompt, reply, history)
     return result.strip()
 
 
@@ -384,4 +394,52 @@ async def hobby_favorite_agent(user_message, reply):
         f"Your answer:"
     )
     result = await generate_response(prompt, "", history=None)
+    return result.strip()
+
+
+async def followup_question_agent(answer, history):
+    prompt = followup_question_agent_prompt.format(
+        history=format_history(history), answer=answer
+    )
+    result = await generate_response(prompt, answer, history)
+    return result.strip()
+
+
+async def compact_followup_agent(reply, history):
+    prompt = compact_followup_agent_prompt.format(
+        history=format_history(history), reply=reply
+    )
+    result = await generate_response(prompt, reply, history)
+    return result.strip()
+
+
+async def final_truncation_agent(reply, history):
+    prompt = final_truncation_agent_prompt.format(
+        history=format_history(history), reply=reply
+    )
+    result = await generate_response(prompt, reply, history)
+    return result.strip()
+
+
+async def final_decision_agent(reply, history):
+    prompt = final_decision_agent_prompt.format(
+        history=format_history(history), reply=reply
+    )
+    result = await generate_response(prompt, reply, history)
+    return result.strip().lower()
+
+
+async def question_decision_agent(reply, history):
+    prompt = question_decision_agent_prompt.format(
+        history=format_history(history), reply=reply
+    )
+    result = await generate_response(prompt, reply, history)
+    return result.strip().lower()
+
+
+async def casual_grammar_agent(reply, history):
+    prompt = casual_grammar_agent_prompt.format(
+        history=format_history(history), reply=reply
+    )
+    result = await generate_response(prompt, reply, history)
     return result.strip()

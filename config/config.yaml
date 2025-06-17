@@ -1,6 +1,6 @@
 bot:
   # Owner ID of your account (can't be same as bot's ID)
-  owner_id: 1371144116083232851
+  owner_id: 1377995088088535204
 
   # Prefix you want bot commands to be triggered with
   prefix: "~"
@@ -47,6 +47,12 @@ bot:
   reply_ping: true
 
   active_channels: [1377995088088535204]  # Replace with your channel IDs
+
+#gfogo
+# 1330374920236171264
+
+#test
+# 1377995088088535204
 
 notifications:
   error_webhook: ""
