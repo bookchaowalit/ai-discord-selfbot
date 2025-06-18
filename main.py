@@ -22,19 +22,13 @@ from utils.ai import generate_response, generate_response_image, init_ai
 from utils.ai_agents import (
     analyze_history_agent,
     casual_grammar_agent,
-    channel_vocab_agent,
     compact_followup_agent,
-    ensure_english_agent,
     final_compact_agent,
-    final_decision_agent,
     final_truncation_agent,
     followup_question_agent,
     personalization_agent,
-    question_decision_agent,
-    relevance_agent,
     reply_validity_agent,
     time_question_agent,
-    topic_filter_agent,
 )
 from utils.api_server import app, broadcast_log
 from utils.db import (
@@ -330,32 +324,11 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         await bot.close()
         return
 
-    # --- Topic filter ---
-    is_simple = await topic_filter_agent(last_user_message, history, message)
-    if not is_simple:
-        await log("[TOPIC FILTER AGENT] Skipping: not a simple/casual question.")
-        print(
-            "[AI-Selfbot] [TOPIC FILTER AGENT] Skipping: not a simple/casual question."
-        )
-        return
-
-    # --- Relevance filter ---
-    is_relevant = await relevance_agent(last_user_message, history, message)
-    if not is_relevant:
-        await log(
-            "[RELEVANCE AGENT] Skipping: message not relevant or too hard/abnormal."
-        )
-        print(
-            "[AI-Selfbot] [RELEVANCE AGENT] Skipping: message not relevant or too hard/abnormal."
-        )
-        return
-
     # --- 1. Analyze history and summarize context (optional, for logging or future use) ---
-    summary = await analyze_history_agent(last_user_message, history)
+    summary = await analyze_history_agent(history)
     print(f"[AI-Selfbot] [HISTORY SUMMARY] {summary}")
     await log(f"[HISTORY SUMMARY] {summary}")
 
-    # special_words = await channel_vocab_agent(history, message)
     # --- 2. Generate a personalized, context-aware reply ---
     response = await personalization_agent(last_user_message, message, history)
     await log(f"[PERSONALIZED RESPONSE] {response}")

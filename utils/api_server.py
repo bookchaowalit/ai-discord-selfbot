@@ -8,12 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from utils.prompts import (  # Import prompts from prompts.py
-    filter_agent_prompt,
-    language_is_english_agent_prompt,
     personalization_agent_prompt,
-    reply_to_reply_agent_prompt,
     reply_validity_agent_prompt,
-    tone_context_agent_prompt,
 )
 
 connected_clients = set()
@@ -86,18 +82,6 @@ async def broadcast_log(
 
 # Agent settings with prompts
 agent_settings = {
-    "reply_to_reply_agent": {
-        "enabled": True,
-        "prompt": reply_to_reply_agent_prompt,
-    },
-    "filter_agent": {
-        "enabled": True,
-        "prompt": filter_agent_prompt,
-    },
-    "tone_context_agent": {
-        "enabled": True,
-        "prompt": tone_context_agent_prompt,
-    },
     "reply_validity_agent": {
         "enabled": True,
         "prompt": reply_validity_agent_prompt,
@@ -105,10 +89,6 @@ agent_settings = {
     "personalization_agent": {
         "enabled": True,
         "prompt": personalization_agent_prompt,
-    },
-    "language_is_english_agent": {
-        "enabled": True,
-        "prompt": language_is_english_agent_prompt,
     },
 }
 

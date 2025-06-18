@@ -1,15 +1,16 @@
 flowchart TD
-    A[User sends message] --> B{Is message from\ntarget user?}
-    B -- No --> Z[Ignore]
-    B -- Yes --> C[Add message to\nhistory & context]
-    C --> D{Is this the last message?}
-    D -- No --> Z
-    D -- Yes --> E[Classify message tone & context]
-    E --> F{Is message suitable\nfor response?}
-    F -- No --> G[Optionally send\nfallback or ignore]
-    F -- Yes --> H[Generate\ncontext-aware reply]
-    H --> I{Is reply valid\nand non-empty?}
-    I -- No --> G
-    I -- Yes --> J[Calculate variable delay\n(based on reply length)]
-    J --> K[Simulate typing indicator\nand inject typos/corrections]
-    K --> L[Send reply to chat]
+    A[User Message + History] --> B[analyze_history_agent]
+    B --> C[personalization_agent]
+    C --> D[reply_validity_agent]
+    D -- not "yes" --> Z[Stop: No Reply]
+    D -- "yes" --> E[final_compact_agent]
+    E --> F[question_decision_agent]
+    F -- "yes" --> G[followup_question_agent]
+    G --> H[compact_followup_agent]
+    H --> I[final_decision_agent]
+    F -- "no" --> I
+    I -- "truncate" --> J[final_truncation_agent]
+    I -- "ok" --> K
+    J --> K[casual_grammar_agent]
+    I -- "ok" --> K[casual_grammar_agent]
+    K --> L[Send Final Reply]
