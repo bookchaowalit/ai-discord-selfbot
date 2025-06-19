@@ -26,9 +26,10 @@ from utils.ai_agents import (
     final_compact_agent,
     final_truncation_agent,
     followup_question_agent,
+    gfogo_repeat_filter_agent,
+    memory_agent,
     personalization_agent,
     reply_validity_agent,
-    time_question_agent,
 )
 from utils.api_server import app, broadcast_log
 from utils.db import (
@@ -62,7 +63,7 @@ CONVERSATION_TIMEOUT = 150.0
 
 async def auto_greeting_task():
     await bot.wait_until_ready()
-    greetings = ["Gfogo"]
+    greetings = ["Gfogo", "Wassup", "Hello", "Hi there", "Hey"]
     while not bot.is_closed():
         if bot.active_channels:
             channel_id = random.choice(list(bot.active_channels))
@@ -334,6 +335,20 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     await log(f"[PERSONALIZED RESPONSE] {response}")
     print(f"[AI-Selfbot] [PERSONALIZED RESPONSE] {response}")
 
+    response = await memory_agent(last_user_message, history)
+    await log(f"[MEMORY AGENT] {response}")
+    print(f"[AI-Selfbot] [MEMORY AGENT] {response}")
+
+    # --- 3. Check the gfogo repeat filter ---
+    response = await gfogo_repeat_filter_agent(response, history)
+    await log(f"[GFOGO REPEAT FILTER] {response}")
+    print(f"[AI-Selfbot] [GFOGO REPEAT FILTER] {response}")
+
+    # --- 4. Check the response is too long ---
+    response = await final_compact_agent(response, history)
+    await log(f"[FINAL COMPACT AGENT] {response}")
+    print(f"[AI-Selfbot] [FINAL COMPACT AGENT] {response}")
+
     # --- Reply Validity Agent ---
     is_valid = await reply_validity_agent(response, message, history)
     await log(f"[REPLY VALIDITY] {is_valid}")
@@ -364,18 +379,6 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     response = await casual_grammar_agent(response, history)
     await log(f"[CASUAL GRAMMAR AGENT] {response}")
     print(f"[AI-Selfbot] [CASUAL GRAMMAR AGENT] {response}")
-
-    # --- Time Question Agent (at the end for naturalness) ---
-    time_answer = await time_question_agent(last_user_message, history, message)
-    if time_answer not in ["no", "exact"]:
-        await log(f"[TIME AGENT] {time_answer}")
-        print(f"[AI-Selfbot] [TIME AGENT] {time_answer}")
-        response = time_answer
-    elif time_answer == "exact":
-        thai_time = get_thai_time_phrase()
-        await log(f"[TIME AGENT] {thai_time}")
-        print(f"[AI-Selfbot] [TIME AGENT] {thai_time}")
-        response = thai_time
 
     chunks = split_response(response)
     sent = False

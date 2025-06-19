@@ -8,10 +8,11 @@ from utils.prompts import (
     final_decision_agent_prompt,
     final_truncation_agent_prompt,
     followup_question_agent_prompt,
+    gfogo_repeat_filter_agent_prompt,
+    memory_agent_prompt,
     personalization_agent_prompt,
     question_decision_agent_prompt,
     reply_validity_agent_prompt,
-    time_question_agent_prompt,
 )
 
 # Import agent_settings and broadcast_log from your FastAPI server
@@ -100,16 +101,6 @@ async def analyze_history_agent(history):
     return result.strip()
 
 
-async def time_question_agent(user_message, history=None, message=None):
-    prompt = (
-        f"{time_question_agent_prompt}\n"
-        f'User message: "{user_message}"\n'
-        f"Your answer:"
-    )
-    result = await generate_response(prompt, "", history=None)
-    return result.strip().lower()
-
-
 async def followup_question_agent(answer, history):
     prompt = followup_question_agent_prompt.format(
         history=format_history(history), answer=answer
@@ -163,4 +154,26 @@ async def final_compact_agent(reply, history):
         history=format_history(history), reply=reply
     )
     result = await generate_response(prompt, reply, history)
+    return result.strip()
+
+
+async def gfogo_repeat_filter_agent(reply, history):
+    formatted_history = "\n".join(
+        f"{h['role']}: {h['content']}" for h in history if h.get("content")
+    )
+    prompt = gfogo_repeat_filter_agent_prompt.format(
+        history=formatted_history, reply=reply
+    )
+    result = await generate_response(prompt, reply, history)
+    return result.strip()
+
+
+async def memory_agent(user_message, history):
+    formatted_history = "\n".join(
+        f"{h['role']}: {h['content']}" for h in history if h.get("content")
+    )
+    prompt = memory_agent_prompt.format(
+        history=formatted_history, user_message=user_message
+    )
+    result = await generate_response(prompt, user_message, history)
     return result.strip()

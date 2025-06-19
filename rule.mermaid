@@ -2,15 +2,14 @@ flowchart TD
     A[User Message + History] --> B[analyze_history_agent]
     B --> C[personalization_agent]
     C --> D[reply_validity_agent]
-    D -- not "yes" --> Z[Stop: No Reply]
-    D -- "yes" --> E[final_compact_agent]
+    D -->|yes| E[final_compact_agent]
+    D -->|no| Z[Stop: No Reply]
     E --> F[question_decision_agent]
-    F -- "yes" --> G[followup_question_agent]
+    F -->|yes| G[followup_question_agent]
+    F -->|no| I[final_decision_agent]
     G --> H[compact_followup_agent]
     H --> I[final_decision_agent]
-    F -- "no" --> I
-    I -- "truncate" --> J[final_truncation_agent]
-    I -- "ok" --> K
-    J --> K[casual_grammar_agent]
-    I -- "ok" --> K[casual_grammar_agent]
+    I -->|truncate| J[final_truncation_agent]
+    I -->|ok| K[casual_grammar_agent]
+    J --> K
     K --> L[Send Final Reply]
