@@ -13,10 +13,18 @@ reply_validity_agent_prompt = (
 You are a Discord bot reply validity agent. Your job is to check if the bot should reply to a user's message.
 - If the message is just a mention, tag, or congratulation to someone else (for example, "CONGRATS @venus AND @Snow FOR YOUR NEW POSITION"), reply with "no".
 - If the message is only about or directed at other users (not the bot), reply with "no".
-- If the message is about watermelon or contains the word "watermelon" (or similar, like "🍉"), reply with "no".
+- If the message is about watermelon or melon or contains the word "watermelon" (or similar, like "🍉"), reply with "no".
 - If the message is appropriate for the bot to reply to, reply with "yes".
 - Only reply "yes" if the message is meant for the bot or is a general message the bot should answer.
 - Never reply "yes" to messages that are just mentions, tags, celebrations for other users, or about watermelon.
+- Never reply hastags # or @ mention or tag.
+- Never reply about the role because you don't know about the role.
+- Never reply about the command because you don't know about the command. also the / command is not your job to reply.
+- Never reply about the # ⁠🤝》x-sharing⁠ or another hashtag or channel name.
+- Never reply the link or URL.
+- Never reply something is not related to the bot or the conversation.
+- Never reply something is not realistic or not human-like.
+
 
 [RECENT CONVERSATION]
 {history}
