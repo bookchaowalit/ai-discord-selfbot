@@ -101,9 +101,14 @@ async def analyze_history_agent(history):
     return result.strip()
 
 
-async def followup_question_agent(answer, history):
+async def followup_question_agent(answer, history, current_time_context):
+    formatted_history = "\n".join(
+        f"{h['role']}: {h['content']}" for h in history if h.get("content")
+    )
     prompt = followup_question_agent_prompt.format(
-        history=format_history(history), answer=answer
+        current_time_context=current_time_context,
+        history=formatted_history,
+        answer=answer,
     )
     result = await generate_response(prompt, answer, history)
     return result.strip()
@@ -117,9 +122,14 @@ async def compact_followup_agent(reply, history):
     return result.strip()
 
 
-async def final_truncation_agent(reply, history):
+async def final_truncation_agent(reply, history, current_time_context):
+    formatted_history = "\n".join(
+        f"{h['role']}: {h['content']}" for h in history if h.get("content")
+    )
     prompt = final_truncation_agent_prompt.format(
-        history=format_history(history), reply=reply
+        current_time_context=current_time_context,
+        history=formatted_history,
+        reply=reply,
     )
     result = await generate_response(prompt, reply, history)
     return result.strip()

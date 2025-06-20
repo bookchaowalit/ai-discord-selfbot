@@ -50,6 +50,8 @@ bot:
 
   active_channels: [1377995088088535204]  # Replace with your channel IDs
 
+  ignore_users: []
+
 #gfogo
 # 1330374920236171264
 

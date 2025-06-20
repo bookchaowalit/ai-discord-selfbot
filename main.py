@@ -14,6 +14,7 @@ import discord
 import emoji
 import pytz
 import requests
+import yaml
 from colorama import Fore, Style, init
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -59,6 +60,13 @@ SPAM_TIME_WINDOW = 10.0
 COOLDOWN_DURATION = 60.0
 MAX_HISTORY = 15
 CONVERSATION_TIMEOUT = 150.0
+
+
+# Load config and active channels/ignore list
+with open("config/config.yaml", "r") as f:
+    config = yaml.safe_load(f)
+active_channels = config["bot"].get("active_channels", [])
+ignore_users = set(str(uid) for uid in config["bot"].get("ignore_users", []))
 
 
 async def auto_greeting_task():
@@ -325,6 +333,7 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
         await bot.close()
         return
 
+    current_time_context = get_current_time_context()
     # --- 1. Analyze history and summarize context (optional, for logging or future use) ---
     summary = await analyze_history_agent(history)
     print(f"[AI-Selfbot] [HISTORY SUMMARY] {summary}")
@@ -363,7 +372,7 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     await log(f"[FINAL COMPACT AGENT] {response}")
     print(f"[AI-Selfbot] [FINAL COMPACT AGENT] {response}")
 
-    response = await followup_question_agent(response, history)
+    response = await followup_question_agent(answer, history, current_time_context)
     await log(f"[FOLLOW-UP QUESTION AGENT] {response}")
     print(f"[AI-Selfbot] [FOLLOW-UP QUESTION AGENT] {response}")
 
@@ -372,7 +381,7 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     await log(f"[COMPACT FOLLOW-UP AGENT] {response}")
     print(f"[AI-Selfbot] [COMPACT FOLLOW-UP AGENT] {response}")
 
-    response = await final_truncation_agent(response, history)
+    response = await final_truncation_agent(reply, history, current_time_context)
     await log(f"[FINAL TRUNCATION AGENT] {response}")
     print(f"[AI-Selfbot] [FINAL TRUNCATION AGENT] {response}")
 
@@ -446,6 +455,10 @@ async def on_message(message):
         return
 
     if is_gif_message(message):
+        return
+
+    if str(message.author.id) in ignore_users:
+        print(f"Ignoring message from user {message.author.id}")
         return
     # --- Store message history in DB (only for active_channels) ---
     if message.channel.id in bot.active_channels:
