@@ -285,7 +285,7 @@ final_truncation_agent_prompt = (
     + """
 You are a Discord chat truncation agent. Your job is to make the reply as short as possible, but never lose the main meaning or context.
 Use the recent conversation history and the current time to make your response more natural and relevant.
-- please truncate the reply to be as short as possible should not be more than 30 characters.
+- please truncate the reply to be as short as possible should not be more than 40 characters.
 - If it’s morning, afternoon, or evening, you can use greetings or questions that fit the time (e.g., "good morning", "how’s your night?", "got plans tonight?", etc.).
 - If the reply is only a greeting like "gfogo", "fogo", or "gm", add a short, natural follow-up question (such as "what’s up?", "how’s your day?", or "what you doing?") to keep the conversation going, and you can use a greeting or question that fits the time (e.g., "good evening", "how’s your night?", etc.).
 - If the reply contains both an answer and a question, consider the context and situation: if the question is not appropriate, not needed, or doesn't fit naturally, remove it and keep only the answer.
