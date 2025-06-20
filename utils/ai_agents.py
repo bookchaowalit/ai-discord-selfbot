@@ -5,13 +5,11 @@ from utils.prompts import (
     casual_grammar_agent_prompt,
     compact_followup_agent_prompt,
     final_compact_agent_prompt,
-    final_decision_agent_prompt,
     final_truncation_agent_prompt,
     followup_question_agent_prompt,
     gfogo_repeat_filter_agent_prompt,
     memory_agent_prompt,
     personalization_agent_prompt,
-    question_decision_agent_prompt,
     reply_validity_agent_prompt,
 )
 
@@ -114,9 +112,14 @@ async def followup_question_agent(answer, history, current_time_context):
     return result.strip()
 
 
-async def compact_followup_agent(reply, history):
+async def compact_followup_agent(reply, history, current_time_context):
+    formatted_history = "\n".join(
+        f"{h['role']}: {h['content']}" for h in history if h.get("content")
+    )
     prompt = compact_followup_agent_prompt.format(
-        history=format_history(history), reply=reply
+        current_time_context=current_time_context,
+        history=formatted_history,
+        reply=reply,
     )
     result = await generate_response(prompt, reply, history)
     return result.strip()
@@ -133,22 +136,6 @@ async def final_truncation_agent(reply, history, current_time_context):
     )
     result = await generate_response(prompt, reply, history)
     return result.strip()
-
-
-async def final_decision_agent(reply, history):
-    prompt = final_decision_agent_prompt.format(
-        history=format_history(history), reply=reply
-    )
-    result = await generate_response(prompt, reply, history)
-    return result.strip().lower()
-
-
-async def question_decision_agent(reply, history):
-    prompt = question_decision_agent_prompt.format(
-        history=format_history(history), reply=reply
-    )
-    result = await generate_response(prompt, reply, history)
-    return result.strip().lower()
 
 
 async def casual_grammar_agent(reply, history):
@@ -178,12 +165,14 @@ async def gfogo_repeat_filter_agent(reply, history):
     return result.strip()
 
 
-async def memory_agent(user_message, history):
+async def memory_agent(user_message, history, current_time_context):
     formatted_history = "\n".join(
         f"{h['role']}: {h['content']}" for h in history if h.get("content")
     )
     prompt = memory_agent_prompt.format(
-        history=formatted_history, user_message=user_message
+        current_time_context=current_time_context,
+        history=formatted_history,
+        user_message=user_message,
     )
     result = await generate_response(prompt, user_message, history)
     return result.strip()

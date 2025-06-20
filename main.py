@@ -344,7 +344,7 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     await log(f"[PERSONALIZED RESPONSE] {response}")
     print(f"[AI-Selfbot] [PERSONALIZED RESPONSE] {response}")
 
-    response = await memory_agent(last_user_message, history)
+    response = await memory_agent(last_user_message, history, current_time_context)
     await log(f"[MEMORY AGENT] {response}")
     print(f"[AI-Selfbot] [MEMORY AGENT] {response}")
 
@@ -377,7 +377,7 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     print(f"[AI-Selfbot] [FOLLOW-UP QUESTION AGENT] {response}")
 
     # Compact the answer+question
-    response = await compact_followup_agent(response, history)
+    response = await compact_followup_agent(response, history, current_time_context)
     await log(f"[COMPACT FOLLOW-UP AGENT] {response}")
     print(f"[AI-Selfbot] [COMPACT FOLLOW-UP AGENT] {response}")
 
@@ -493,9 +493,9 @@ async def on_message(message):
             cooldown_end = bot.user_cooldowns[user_id]
             if current_time < cooldown_end:
                 remaining = int(cooldown_end - current_time)
-                print(
-                    f"{datetime.now().strftime('[%H:%M:%S]')} User {message.author.name} is on cooldown for {remaining}s"
-                )
+                # print(
+                #     f"{datetime.now().strftime('[%H:%M:%S]')} User {message.author.name} is on cooldown for {remaining}s"
+                # )
                 return
             else:
                 del bot.user_cooldowns[user_id]
@@ -513,9 +513,9 @@ async def on_message(message):
 
         if len(bot.user_message_counts[user_id]) > SPAM_MESSAGE_THRESHOLD:
             bot.user_cooldowns[user_id] = current_time + COOLDOWN_DURATION
-            print(
-                f"{datetime.now().strftime('[%H:%M:%S]')} User {message.author.name} has been put on {COOLDOWN_DURATION}s cooldown for spam"
-            )
+            # print(
+            #     f"{datetime.now().strftime('[%H:%M:%S]')} User {message.author.name} has been put on {COOLDOWN_DURATION}s cooldown for spam"
+            # )
             bot.user_message_counts[user_id] = []
             return
 
