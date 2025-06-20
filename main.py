@@ -372,7 +372,7 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     await log(f"[FINAL COMPACT AGENT] {response}")
     print(f"[AI-Selfbot] [FINAL COMPACT AGENT] {response}")
 
-    response = await followup_question_agent(answer, history, current_time_context)
+    response = await followup_question_agent(response, history, current_time_context)
     await log(f"[FOLLOW-UP QUESTION AGENT] {response}")
     print(f"[AI-Selfbot] [FOLLOW-UP QUESTION AGENT] {response}")
 
@@ -381,7 +381,7 @@ async def generate_response_and_reply(message, prompt, history, image_url=None):
     await log(f"[COMPACT FOLLOW-UP AGENT] {response}")
     print(f"[AI-Selfbot] [COMPACT FOLLOW-UP AGENT] {response}")
 
-    response = await final_truncation_agent(reply, history, current_time_context)
+    response = await final_truncation_agent(response, history, current_time_context)
     await log(f"[FINAL TRUNCATION AGENT] {response}")
     print(f"[AI-Selfbot] [FINAL TRUNCATION AGENT] {response}")
 
